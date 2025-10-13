@@ -19,12 +19,14 @@ import {
   Share2,
   Copy,
   HelpCircle,
-  Mail,
   Shield,
   Trash2,
   UserPlus,
+  IndianRupee,
+  Plus,
+  X,
 } from "lucide-react";
-
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +35,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
 import {
   Dialog,
   DialogContent,
@@ -41,7 +42,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-
 import {
   Select,
   SelectContent,
@@ -91,10 +91,19 @@ const UnifiedDashboard: React.FC = () => {
   const [selectedTeacher, setSelectedTeacher] = useState<any | null>(null);
   const [showPricingModal, setShowPricingModal] = useState(false);
 
+  // Pricing Settings (dummy local version)
+  const [customDurations, setCustomDurations] = useState([
+    { id: 1, minutes: 1, price: 39, isBase: true },
+    { id: 2, minutes: 5, price: 199, isBase: false },
+    { id: 3, minutes: 10, price: 399, isBase: false },
+  ]);
+  const [newDuration, setNewDuration] = useState({ minutes: "", price: "" });
+
   // Load current user
   useEffect(() => {
     let mounted = true;
-    api.getMe()
+    api
+      .getMe()
       .then((res) => {
         if (!mounted) return;
         if (res?.success) setCurrentUser(res.user);
@@ -123,7 +132,7 @@ const UnifiedDashboard: React.FC = () => {
     }
   };
 
-  // Socket event handling (connect, incoming calls, user status, call responses)
+  // Socket event handling
   useEffect(() => {
     if (!socket) return;
 
@@ -132,14 +141,9 @@ const UnifiedDashboard: React.FC = () => {
       fetchOnlineUsers();
     };
 
-    const onUserStatus = (payload: any) => {
-      // payload: { userId, online }
-      // refresh list to reflect new online statuses
-      fetchOnlineUsers();
-    };
+    const onUserStatus = () => fetchOnlineUsers();
 
     const onIncoming = (payload: any) => {
-      console.log("📡 [SOCKET] call:incoming", payload);
       setIncomingCall(payload);
       setShowIncoming(true);
       toast({
@@ -149,7 +153,6 @@ const UnifiedDashboard: React.FC = () => {
     };
 
     const onCallResponse = (payload: any) => {
-      console.log("📡 [SOCKET] call:response", payload);
       if (payload.accepted && payload.channelName) {
         navigate(`/call/${payload.channelName}`);
       } else {
@@ -166,7 +169,6 @@ const UnifiedDashboard: React.FC = () => {
     socket.on("call:incoming", onIncoming);
     socket.on("call:response", onCallResponse);
 
-    // initial population
     fetchOnlineUsers();
 
     return () => {
@@ -175,63 +177,57 @@ const UnifiedDashboard: React.FC = () => {
       socket.off("call:incoming", onIncoming);
       socket.off("call:response", onCallResponse);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, currentUser]);
 
-  // Helper: open pricing modal for a teacher (this will start payment → call)
- const openPricingForTeacher = (teacher: any) => {
-  // 🛡️ Ensure teacher.pricingTiers is always an array
-  const safeTeacher = {
-    ...teacher,
-    pricingTiers: Array.isArray(teacher?.pricingTiers)
-      ? teacher.pricingTiers
-      : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }],
+  // Payment complete → emit call request
+  const onPaymentComplete = (payload: {
+    teacherId: string;
+    minutes: number;
+    price: number;
+  }) => {
+    const channelName = `call-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const toUserId = payload.teacherId;
+    const price = payload.price;
+
+    if (!socket) {
+      toast({ title: "Socket not connected", variant: "destructive" });
+      return;
+    }
+
+    toast({
+      title: "Payment successful 💰",
+      description: "Starting your video call...",
+    });
+
+    socket.emit("call:request", { toUserId, channelName, price });
+
+    setShowPricingModal(false);
+    setSelectedTeacher(null);
   };
 
-  setSelectedTeacher(safeTeacher);
-  setShowPricingModal(true);
-};
+  const openPricingForTeacher = (teacher: any) => {
+    const safeTeacher = {
+      ...teacher,
+      pricingTiers: Array.isArray(teacher?.pricingTiers)
+        ? teacher.pricingTiers
+        : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }],
+    };
+    setSelectedTeacher(safeTeacher);
+    setShowPricingModal(true);
+  };
 
-
-  // Called by PricingModal after payment is completed
-  // NOTE: PricingModal must call this with { teacherId, minutes, price }
-  const onPaymentComplete = (payload: { teacherId: string; minutes: number; price: number }) => {
-  const channelName = `call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const toUserId = payload.teacherId;
-  const price = payload.price;
-
-  if (!socket) {
-    toast({ title: "Socket not connected", variant: "destructive" });
-    return;
-  }
-
-  // 1️⃣ Inform user
-  toast({
-    title: "Payment successful 💰",
-    description: "Starting your video call...",
-  });
-
-  // 2️⃣ Send call request to backend/teacher
-  socket.emit("call:request", { toUserId, channelName, price });
-
-  // 3️⃣ Navigate the caller immediately to the call screen
-  // (This ensures caller joins the Agora room right away)
- // navigate(`/call/${channelName}`);
-
-  // 4️⃣ Close pricing modal cleanly
-  setShowPricingModal(false);
-  setSelectedTeacher(null);
-};
-
-  // Click "Connect" handler (for user cards)
   const handleConnect = (userId: string, rate: number, userObj?: any) => {
-    // If you want to route through a pricing/payment step, open PricingModal with the teacher data.
-    // Here we open PricingModal passing teacher-like object (fallback).
-    const teacherLike = userObj || { id: userId, name: "User", pricingTiers: [{ minutes: 1, price: rate || 39 }] };
+    const teacherLike =
+      userObj || {
+        id: userId,
+        name: "User",
+        pricingTiers: [{ minutes: 1, price: rate || 39 }],
+      };
     openPricingForTeacher(teacherLike);
   };
 
-  // Toggle online status
   const handleOnlineToggle = (checked: boolean) => {
     setIsOnline(checked);
     if (!socket) {
@@ -245,7 +241,9 @@ const UnifiedDashboard: React.FC = () => {
     });
 
     if (checked) {
-      const link = `${window.location.origin}/connect/${Math.random().toString(36).substring(7)}`;
+      const link = `${window.location.origin}/connect/${Math.random()
+        .toString(36)
+        .substring(7)}`;
       setShareLink(link);
       setShowShareDialog(true);
       toast({ title: "✅ You're now online" });
@@ -254,7 +252,6 @@ const UnifiedDashboard: React.FC = () => {
     }
   };
 
-  // Copy share link
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text || "");
     toast({
@@ -263,9 +260,9 @@ const UnifiedDashboard: React.FC = () => {
     });
   };
 
-  // Share handler used in share dialog (small helper)
   const shareOnSocial = (platform: string) => {
-    const message = "I'm online and available for calls on ONEVYOU! Connect with me now: ";
+    const message =
+      "I'm online and available for calls on ONEVYOU! Connect with me now: ";
     const encodedMessage = encodeURIComponent(message);
     const encodedUrl = encodeURIComponent(shareLink);
 
@@ -279,7 +276,7 @@ const UnifiedDashboard: React.FC = () => {
     if (urls[platform]) window.open(urls[platform], "_blank");
   };
 
-  // Filter + sort the users list
+  // Filter & sort
   const filteredUsers = useMemo(() => {
     let list = users.filter((u) => {
       const name = u.fullName || u.profile?.name || u.phoneNumber || "User";
@@ -287,58 +284,26 @@ const UnifiedDashboard: React.FC = () => {
     });
 
     if (filterBy !== "all") {
-      // simple filter by expertise-like field if available (skip if not)
       list = list.filter((u) =>
-        (u.profile?.expertise || "").toLowerCase().includes(filterBy.toLowerCase())
+        (u.profile?.expertise || "")
+          .toLowerCase()
+          .includes(filterBy.toLowerCase())
       );
     }
 
-    if (sortBy === "rate-high") list.sort((a, b) => (b.ratePerMinute || 0) - (a.ratePerMinute || 0));
-    else if (sortBy === "rate-low") list.sort((a, b) => (a.ratePerMinute || 0) - (b.ratePerMinute || 0));
+    if (sortBy === "rate-high")
+      list.sort((a, b) => (b.ratePerMinute || 0) - (a.ratePerMinute || 0));
+    else if (sortBy === "rate-low")
+      list.sort((a, b) => (a.ratePerMinute || 0) - (b.ratePerMinute || 0));
     else list.sort((a, b) => (a.fullName || "").localeCompare(b.fullName || ""));
 
     return list;
   }, [users, searchTerm, sortBy, filterBy]);
 
-  // Example static teachers for the visual "TeacherCard" grid (keeps the 'needed' look)
-  const sampleTeachers = [
-    {
-      id: "t-1",
-      name: "Sarah Johnson",
-      expertise: "Web Development",
-      rating: 4.9,
-      isOnline: true,
-      pricingTiers: [{ minutes: 1, price: 39 }, { minutes: 5, price: 199 }],
-    },
-    {
-      id: "t-2",
-      name: "Michael Chen",
-      expertise: "Mathematics",
-      rating: 4.8,
-      isOnline: false,
-      pricingTiers: [{ minutes: 1, price: 39 }, { minutes: 5, price: 149 }],
-    },
-    {
-      id: "t-3",
-      name: "Emily Davis",
-      expertise: "Graphic Design",
-      rating: 5.0,
-      isOnline: true,
-      pricingTiers: [{ minutes: 1, price: 39 }, { minutes: 7, price: 299 }],
-    },
-    {
-      id: "t-4",
-      name: "David Park",
-      expertise: "Piano & Music Theory",
-      rating: 4.7,
-      isOnline: true,
-      pricingTiers: [{ minutes: 1, price: 39 }, { minutes: 10, price: 499 }],
-    },
-  ];
-
+  // --- UI ---
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/30 to-background relative">
-      {/* subtle background pattern */}
+      {/* Subtle pattern */}
       <div
         className="fixed inset-0 opacity-[0.015] pointer-events-none"
         style={{
@@ -351,7 +316,11 @@ const UnifiedDashboard: React.FC = () => {
       <header className="bg-card/60 backdrop-blur-xl border-b border-border/50 sticky top-0 z-40 shadow-sm">
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/lovable-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png" alt="ONEVYOU" className="h-9" />
+            <img
+              src="/lovable-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
+              alt="ONEVYOU"
+              className="h-9"
+            />
             <h1 className="text-2xl font-bold tracking-tight bg-gradient-primary bg-clip-text text-transparent">
               ONEVYOU
             </h1>
@@ -365,34 +334,45 @@ const UnifiedDashboard: React.FC = () => {
             </div>
 
             {/* Notifications */}
-            <Button variant="ghost" size="icon" onClick={() => setShowNotifications(true)} className="relative">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowNotifications(true)}
+              className="relative"
+            >
               <Bell className="h-5 w-5" />
               {isOnline && onlineCount > 0 && (
-                <span className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-white rounded-full text-xs flex items-center justify-center">
+                <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
                   {onlineCount}
-                </span>
+                </Badge>
               )}
             </Button>
 
-            {/* Unified Profile Dropdown (single menu -> launches dialogs) */}
+            {/* Profile dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="flex items-center gap-2">
+                <Button variant="ghost" size="icon">
                   <Avatar className="h-8 w-8">
                     {currentUser?.profileImage ? (
-                      <AvatarImage src={currentUser.profileImage} alt={currentUser.fullName} />
+                      <AvatarImage
+                        src={currentUser.profileImage}
+                        alt={currentUser.fullName}
+                      />
                     ) : (
-                      <AvatarFallback>{currentUser?.fullName ? currentUser.fullName.charAt(0).toUpperCase() : "U"}</AvatarFallback>
+                      <AvatarFallback>
+                        {currentUser?.fullName
+                          ? currentUser.fullName.charAt(0).toUpperCase()
+                          : "U"}
+                      </AvatarFallback>
                     )}
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
 
               <DropdownMenuContent align="end" className="w-72">
-                <DropdownMenuLabel className="flex items-center gap-2">
-                  <div>
-                    <div className="font-medium">{currentUser?.fullName || "Your Profile"}</div>
-                    <div className="text-xs text-muted-foreground">{currentUser?.profile?.expertise || ""}</div>
+                <DropdownMenuLabel>
+                  <div className="font-medium">
+                    {currentUser?.fullName || "Your Profile"}
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -406,50 +386,53 @@ const UnifiedDashboard: React.FC = () => {
                 </DropdownMenuItem>
 
                 <DropdownMenuItem onClick={() => setShowPricingSettings(true)}>
-                  <Settings className="mr-2 h-4 w-4" /> Pricing Settings
+                  <IndianRupee className="mr-2 h-4 w-4" /> Pricing Settings
                 </DropdownMenuItem>
 
-                <DropdownMenuItem onClick={() => navigate("/profile-setup")}>
-                  <Settings className="mr-2 h-4 w-4" /> Edit Profile
-                </DropdownMenuItem>
+                <DropdownMenuItem
+  onClick={() => navigate("/profile-setup?edit=true")}
+>
+  <Settings className="mr-2 h-4 w-4" /> Edit Profile
+</DropdownMenuItem>
 
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => {
-                  const inviteMessage = "Join me on ONEVYOU!";
-                  window.open(`https://wa.me/?text=${encodeURIComponent(inviteMessage + " " + window.location.origin)}`, "_blank");
-                }}>
-                  <UserPlus className="mr-2 h-4 w-4" /> Invite Friends
-                </DropdownMenuItem>
 
-                <DropdownMenuItem onClick={() => {
-                  setShowShareDialog(true);
-                }}>
-                  <Copy className="mr-2 h-4 w-4" /> Share Connect Link
-                </DropdownMenuItem>
 
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => window.open("/help", "_blank")}>
+                <DropdownMenuItem
+                  onClick={() =>
+                    window.open("/help", "_blank")
+                  }
+                >
                   <HelpCircle className="mr-2 h-4 w-4" /> Help & Support
                 </DropdownMenuItem>
-
-                <DropdownMenuItem onClick={() => window.open("/privacy", "_blank")}>
+                <DropdownMenuItem
+                  onClick={() => window.open("/privacy", "_blank")}
+                >
                   <Shield className="mr-2 h-4 w-4" /> Privacy Policy
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive" onClick={() => {
-                  if (confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
-                    toast({ title: "Account deletion requested" });
-                    // call API to request deletion here if needed
-                  }
-                }}>
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        "Are you sure you want to delete your account? This action cannot be undone."
+                      )
+                    ) {
+                      toast({ title: "Account deletion requested" });
+                    }
+                  }}
+                >
                   <Trash2 className="mr-2 h-4 w-4" /> Delete Account
                 </DropdownMenuItem>
 
-                <DropdownMenuItem onClick={() => {
-                  localStorage.clear();
-                  navigate("/");
-                }}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    localStorage.clear();
+                    navigate("/");
+                  }}
+                >
                   <LogOut className="mr-2 h-4 w-4" /> Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -458,9 +441,9 @@ const UnifiedDashboard: React.FC = () => {
         </div>
       </header>
 
-      {/* Main content */}
+      {/* Main */}
       <main className="container mx-auto px-6 py-8">
-        {/* Top controls */}
+        {/* Search + Filters */}
         <div className="flex flex-col md:flex-row gap-4 mb-8 items-center">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -499,98 +482,249 @@ const UnifiedDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Grid: show teachers (visual sample) and live users below */}
-        <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 mb-8">
-          {sampleTeachers.map((t) => (
-            <TeacherCard key={t.id} teacher={t} onConnect={() => openPricingForTeacher(t)} />
-          ))}
-        </div>
-
-        {/* Live users panel (from server) */}
+        {/* Available users */}
         <div className="mb-8">
-          <h3 className="text-lg font-semibold mb-4">Available Users ({onlineCount})</h3>
+          <h3 className="text-lg font-semibold mb-4">
+            Available Users ({onlineCount})
+          </h3>
           <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {filteredUsers.map((u) => (
-              <div key={u._id} className="bg-card/60 border border-border/50 rounded-lg p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">{u.fullName || u.profile?.name || u.phoneNumber}</div>
-                    <div className="text-sm text-muted-foreground">₹{u.ratePerMinute || 39}/min</div>
-                  </div>
-                  <div>
-                    {u.online && <div className="text-green-500 text-sm">● Online</div>}
-                    <Button size="sm" className="mt-3" onClick={() => handleConnect(u._id, u.ratePerMinute || 39, u)}>Connect</Button>
-                  </div>
-                </div>
-              </div>
-            ))}
+            {filteredUsers.map((u, i) => (
+  <TeacherCard
+    key={i}
+    teacher={{
+      name: u.fullName || u.profile?.name || u.phoneNumber || "User",
+      expertise:
+        u.profile?.expertise ||
+        u.profile?.bio ||
+        u.skill ||
+        u.about ||
+        "Skill not specified",
+      rating: u.profile?.rating || 4.8,
+      isOnline: u.online,
+      pricingTiers: [
+        { minutes: 1, price: u.ratePerMinute || 39 },
+        ...(u.profile?.pricingTiers || []),
+      ],
+    }}
+    onConnect={() =>
+      handleConnect(u._id, u.ratePerMinute || 39, u)
+    }
+  />
+))}
+
             {filteredUsers.length === 0 && (
-              <div className="text-muted-foreground">No users online right now.</div>
+              <div className="text-muted-foreground">
+                No users online right now.
+              </div>
             )}
           </div>
         </div>
       </main>
 
-      {/* Incoming call modal (component manages ringtone & accepting inside) */}
-      <IncomingCallModal open={showIncoming} data={incomingCall} onClose={() => setShowIncoming(false)} />
+      {/* Modals */}
+      <IncomingCallModal
+        open={showIncoming}
+        data={incomingCall}
+        onClose={() => setShowIncoming(false)}
+      />
 
-      {/* Notification panel dialog */}
       <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent className="sm:max-w-lg p-0">
           <NotificationPanel />
         </DialogContent>
       </Dialog>
 
-      {/* Share link dialog */}
       <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Share2 className="h-5 w-5" /> Share Connect Link</DialogTitle>
-            <DialogDescription>Share your connect link for instant calls</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="h-5 w-5" /> Share Connect Link
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="flex gap-2">
               <Input value={shareLink} readOnly />
-              <Button size="icon" variant="outline" onClick={() => copyToClipboard(shareLink)}><Copy /></Button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={() => shareOnSocial("twitter")}>Twitter</Button>
-              <Button variant="outline" onClick={() => shareOnSocial("facebook")}>Facebook</Button>
-              <Button variant="outline" onClick={() => shareOnSocial("whatsapp")}>WhatsApp</Button>
-              <Button variant="outline" onClick={() => shareOnSocial("linkedin")}>LinkedIn</Button>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => copyToClipboard(shareLink)}
+              >
+                <Copy />
+              </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Pricing modal (payment then start call) */}
       {selectedTeacher && (
         <PricingModal
           isOpen={showPricingModal}
           teacher={selectedTeacher}
-          onClose={() => { setShowPricingModal(false); setSelectedTeacher(null); }}
-          onPaymentComplete={onPaymentComplete} // IMPORTANT: PricingModal must call this after successful payment
+          onClose={() => {
+            setShowPricingModal(false);
+            setSelectedTeacher(null);
+          }}
+          onPaymentComplete={onPaymentComplete}
         />
       )}
 
-      {/* Pricing settings (for creator to edit pricing options) */}
+      {/* ✅ New Enhanced Pricing Settings */}
       <Dialog open={showPricingSettings} onOpenChange={setShowPricingSettings}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manage Pricing</DialogTitle>
-            <DialogDescription>Set the durations and prices you offer</DialogDescription>
+            <DialogTitle>Manage Your Pricing</DialogTitle>
+            <DialogDescription>
+              Set custom durations and prices for your calls
+            </DialogDescription>
           </DialogHeader>
-          {/* Keep your existing settings UI here — simplified placeholder to avoid breaking */}
-          <div className="py-4">
-            <p className="text-sm text-muted-foreground">Pricing settings UI (keeps your existing UI; replace with your component if you have one)</p>
-            <div className="mt-4">
-              <Button onClick={() => { setShowPricingSettings(false); toast({ title: "Pricing saved" }); }}>Save Pricing</Button>
+
+          <div className="space-y-4 py-4">
+            {customDurations
+              .filter((d) => d.isBase)
+              .map((base) => (
+                <div
+                  key={base.id}
+                  className="bg-primary/10 p-3 rounded-lg flex justify-between items-center"
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">Base</Badge>
+                    <span className="font-medium">{base.minutes} min</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <IndianRupee className="h-4 w-4" />
+                    <span className="font-bold">{base.price}</span>
+                  </div>
+                </div>
+              ))}
+
+            {/* Custom durations */}
+            {customDurations
+              .filter((d) => !d.isBase)
+              .map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between border rounded-lg p-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span>{d.minutes} min</span>
+                    <div className="flex items-center gap-1">
+                      <IndianRupee className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        value={d.price}
+                        onChange={(e) => {
+                          const updated = customDurations.map((cd) =>
+                            cd.id === d.id
+                              ? { ...cd, price: parseInt(e.target.value) || 0 }
+                              : cd
+                          );
+                          setCustomDurations(updated);
+                        }}
+                        className="w-20 h-8"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() =>
+                      setCustomDurations(
+                        customDurations.filter((cd) => cd.id !== d.id)
+                      )
+                    }
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+
+            {/* Add new */}
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="Minutes"
+                type="number"
+                className="w-24"
+                value={newDuration.minutes}
+                onChange={(e) =>
+                  setNewDuration({ ...newDuration, minutes: e.target.value })
+                }
+              />
+              <Input
+                placeholder="Price"
+                type="number"
+                className="w-24"
+                value={newDuration.price}
+                onChange={(e) =>
+                  setNewDuration({ ...newDuration, price: e.target.value })
+                }
+              />
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => {
+                  if (newDuration.minutes && newDuration.price) {
+                    const minutes = parseInt(newDuration.minutes);
+                    const price = parseInt(newDuration.price);
+                    setCustomDurations([
+                      ...customDurations,
+                      {
+                        id: Date.now(),
+                        minutes,
+                        price,
+                        isBase: false,
+                      },
+                    ]);
+                    setNewDuration({ minutes: "", price: "" });
+                    toast({
+                      title: "Added",
+                      description: `${minutes}-minute option added`,
+                    });
+                  }
+                }}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Quick add */}
+            <div className="flex flex-wrap gap-2">
+              {[5, 10, 15, 20, 30, 60].map((min) => (
+                <Button
+                  key={min}
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setCustomDurations([
+                      ...customDurations,
+                      {
+                        id: Date.now() + min,
+                        minutes: min,
+                        price: min * 39,
+                        isBase: false,
+                      },
+                    ])
+                  }
+                >
+                  {min} min - ₹{min * 39}
+                </Button>
+              ))}
             </div>
           </div>
+
+          <Button
+            onClick={() => {
+              setShowPricingSettings(false);
+              toast({
+                title: "Saved",
+                description: "Your pricing settings have been updated",
+              });
+            }}
+          >
+            Save Pricing
+          </Button>
         </DialogContent>
       </Dialog>
 
-      {/* Earnings dialog */}
       <Dialog open={showEarnings} onOpenChange={setShowEarnings}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
@@ -600,7 +734,6 @@ const UnifiedDashboard: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Call history dialog */}
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>

@@ -205,8 +205,8 @@ const PricingModal = ({
               ))}
           </div>
 
-          {/* Custom Duration */}
-          <Card
+          {/*Custom Duration */}
+          {/*<Card
             className={`p-3 cursor-pointer transition-all ${
               selectedDuration === "custom" ? "ring-2 ring-primary" : ""
             }`}
@@ -247,7 +247,7 @@ const PricingModal = ({
                 />
               </div>
             )}
-          </Card>
+          </Card> */}
 
           {/* Payment Methods */}
           <div className="space-y-3">
