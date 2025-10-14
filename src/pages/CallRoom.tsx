@@ -37,7 +37,6 @@ const CallRoom: React.FC = () => {
   const [position, setPosition] = useState({ x: 16, y: 80 });
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
 
-
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const callLimitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -66,25 +65,39 @@ const CallRoom: React.FC = () => {
   // Health check to keep connection alive
   const startHealthCheck = () => {
     if (healthCheckInterval.current) clearInterval(healthCheckInterval.current);
-    
-    healthCheckInterval.current = setInterval(() => {
+
+    healthCheckInterval.current = setInterval(async () => {
       const client = clientRef.current;
-      if (client && client.connectionState === "CONNECTED") {
-        // Send a ping to keep connection alive
-        console.log("Health check: Connection alive");
-      } else if (client && client.connectionState === "DISCONNECTED") {
-        console.warn("Health check: Connection lost, attempting reconnect");
-        attemptReconnect();
+      if (!client) return;
+
+      try {
+        if (client.connectionState === "CONNECTED") {
+          // Make a light stats call to keep connection alive (helps mobile NAT/timeouts)
+          try {
+            // getRTCStats may not exist in some SDK builds; use optional chaining
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            // @ts-ignore
+            await client.getRTCStats?.();
+            console.log("Health check: Connection alive");
+          } catch (err) {
+            console.warn("Health check stats call failed:", err);
+          }
+        } else if (client.connectionState === "DISCONNECTED") {
+          console.warn("Health check: Connection lost, attempting reconnect");
+          attemptReconnect();
+        }
+      } catch (err) {
+        console.warn("Health check exception:", err);
       }
-    }, 10000); // Check every 10 seconds
+    }, 8000); // Check every 8 seconds
   };
 
   const attemptReconnect = async () => {
     if (reconnectAttempts.current >= 3 || isCleaningUp.current) {
-      toast({ 
-        title: "Connection Failed", 
+      toast({
+        title: "Connection Failed",
         description: "Unable to reconnect. Ending call.",
-        variant: "destructive" 
+        variant: "destructive",
       });
       endCall(false);
       return;
@@ -92,18 +105,23 @@ const CallRoom: React.FC = () => {
 
     reconnectAttempts.current++;
     console.log(`Reconnect attempt ${reconnectAttempts.current}`);
-    
+
     try {
       const client = clientRef.current;
       if (!client) return;
 
-      // Republish tracks
+      // Republish tracks if needed
       const publishArr = [localAudioRef.current, localVideoRef.current].filter(Boolean) as any[];
       if (publishArr.length > 0) {
-        await client.publish(publishArr);
+        try {
+          await client.publish(publishArr);
+        } catch (err) {
+          console.warn("Republish failed during reconnect:", err);
+          // attempt subscribe re-setup handled by SDK when connection restored
+        }
       }
-      
-      reconnectAttempts.current = 0; // Reset on success
+
+      reconnectAttempts.current = 0; // Reset on (assumed) success
       toast({ title: "Reconnected successfully" });
     } catch (err) {
       console.error("Reconnect failed:", err);
@@ -117,10 +135,24 @@ const CallRoom: React.FC = () => {
       joinInProgress.current = true;
       await stopTracks();
 
+      // Optional proxy to help mobile networks / WebSocket fallback (may be removed if not needed)
+      try {
+        // Use Agora parameters to enable proxy/fallback behavior for unstable mobile networks
+        // These parameters may be vendor-specific; keep them optional
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        AgoraRTC.setParameter("rtc.enableProxy", true);
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        AgoraRTC.setParameter("rtc.proxyServer", "wss://webdemo.agora.io");
+      } catch (err) {
+        console.warn("Could not set proxy parameters:", err);
+      }
+
       // Create client with optimized settings for mobile
-      const client = AgoraRTC.createClient({ 
-        mode: "rtc", 
-        codec: "vp8" // VP8 is more compatible
+      const client = AgoraRTC.createClient({
+        mode: "rtc",
+        codec: "h264", // ✅ more reliable on many mobile devices
       });
       clientRef.current = client;
 
@@ -140,19 +172,19 @@ const CallRoom: React.FC = () => {
           } catch (err) {
             console.warn(`Join attempt ${attempt + 1} failed:`, err);
             if (attempt === 2) throw err;
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise((r) => setTimeout(r, 1000));
           }
         }
 
         if (!joinSuccess) throw new Error("Failed to join after 3 attempts");
 
         // Network quality monitoring with adaptive response
-        client.on("network-quality", (stats) => {
+        client.on("network-quality", (stats: any) => {
           const uplink = stats.uplinkNetworkQuality;
           const downlink = stats.downlinkNetworkQuality;
-          
+
           const worstQuality = Math.max(uplink, downlink);
-          
+
           if (worstQuality <= 2) {
             setNetworkQuality("good");
           } else if (worstQuality <= 4) {
@@ -178,20 +210,20 @@ const CallRoom: React.FC = () => {
           }
         });
 
-        // Enable dual stream with very conservative settings
+        // Enable dual stream with conservative settings (enable after join)
         try {
           await client.enableDualStream();
           await client.setLowStreamParameter({
             width: 240,
             height: 180,
             framerate: 10,
-            bitrate: 100, // Very low for poor networks
+            bitrate: 100,
           });
         } catch (err) {
           console.warn("Dual stream setup failed:", err);
         }
 
-        // Create tracks with VERY conservative mobile settings
+        // Create tracks with conservative mobile settings
         let audio: ILocalAudioTrack | null = null;
         let video: ILocalVideoTrack | null = null;
 
@@ -204,25 +236,25 @@ const CallRoom: React.FC = () => {
             encoderConfig: {
               sampleRate: 48000,
               stereo: false,
-              bitrate: 48, // Lower bitrate to prevent BITRATE_TOO_LOW error
+              bitrate: 48,
             },
           });
 
-          // Video track with mobile-optimized settings
+          // Video track with mobile-optimized settings (slightly higher bitrate for stable decoding)
           video = await AgoraRTC.createCameraVideoTrack({
             encoderConfig: {
               width: { ideal: 480, max: 640 },
               height: { ideal: 360, max: 480 },
-              frameRate: { ideal: 15, max: 20 }, // Lower framerate for stability
-              bitrateMin: 200,
-              bitrateMax: 500, // Much lower for poor networks
+              frameRate: { ideal: 12, max: 15 }, // lower fps for stability
+              bitrateMin: 300,
+              bitrateMax: 800, // increase to avoid decode failure
             },
-            optimizationMode: "detail",
-            facingMode: "user", // Front camera
+            optimizationMode: "motion",
+            facingMode: "user",
           });
         } catch (err: any) {
           console.error("Track creation error:", err);
-          
+
           // Try audio-only fallback
           try {
             audio = await AgoraRTC.createMicrophoneAudioTrack({
@@ -235,10 +267,10 @@ const CallRoom: React.FC = () => {
                 bitrate: 48,
               },
             });
-            toast({ 
-              title: "Camera unavailable", 
-              description: "Using audio-only mode", 
-              variant: "destructive" 
+            toast({
+              title: "Camera unavailable",
+              description: "Using audio-only mode",
+              variant: "destructive",
             });
           } catch (audioErr) {
             throw new Error("Could not access microphone or camera");
@@ -248,7 +280,7 @@ const CallRoom: React.FC = () => {
         localAudioRef.current = audio;
         localVideoRef.current = video;
 
-        // Play local video
+        // Play local video (safely)
         if (video) {
           try {
             await video.play("local-player");
@@ -269,16 +301,16 @@ const CallRoom: React.FC = () => {
             } catch (err) {
               console.warn(`Publish attempt ${attempt + 1} failed:`, err);
               if (attempt === 2) throw err;
-              await new Promise(r => setTimeout(r, 500));
+              await new Promise((r) => setTimeout(r, 500));
             }
           }
           if (!publishSuccess) throw new Error("Failed to publish tracks");
         }
 
         // Remote user handling
-        client.on("user-published", async (user, mediaType) => {
+        client.on("user-published", async (user: any, mediaType: string) => {
           console.log(`User ${user.uid} published ${mediaType}`);
-          
+
           try {
             // Subscribe with retry
             let subscribeSuccess = false;
@@ -290,56 +322,55 @@ const CallRoom: React.FC = () => {
               } catch (err) {
                 console.warn(`Subscribe attempt ${attempt + 1} failed:`, err);
                 if (attempt === 2) throw err;
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise((r) => setTimeout(r, 500));
               }
             }
 
             if (!subscribeSuccess) throw new Error("Failed to subscribe");
 
+            // Immediately request low-quality stream for stability on mobile
             if (mediaType === "video") {
-  try {
-    // Always request low-quality stream for stability on poor networks
-    await client.setRemoteVideoStreamType(user.uid, 1);
-  } catch (err) {
-    console.warn("Low stream request failed:", err);
-  }
+              try {
+                await client.setRemoteVideoStreamType(user.uid, 1); // low stream
+              } catch (err) {
+                console.warn("Low stream request failed:", err);
+              }
 
-  // Remove any old player element before creating a new one
-  const existingPlayer = document.getElementById(`player-${user.uid}`);
-  if (existingPlayer) existingPlayer.remove();
+              // Remove any old player element before creating a new one
+              const existingPlayer = document.getElementById(`player-${user.uid}`);
+              if (existingPlayer) existingPlayer.remove();
 
-  // Create a new player container
-  const el = document.createElement("div");
-  el.id = `player-${user.uid}`;
-  el.className = "w-full h-full";
-  document.getElementById("remote-player")?.append(el);
+              // Create a new player container
+              const el = document.createElement("div");
+              el.id = `player-${user.uid}`;
+              el.className = "w-full h-full";
+              document.getElementById("remote-player")?.append(el);
 
-  // ✅ Improved retry logic with safety against RECV_VIDEO_DECODE_FAILED
-  const playWithRetry = async (retries = 4) => {
-    for (let i = 0; i < retries; i++) {
-      try {
-        await new Promise((r) => setTimeout(r, 400 * (i + 1)));
-        user.videoTrack?.stop();
-        user.videoTrack?.play(`player-${user.uid}`);
-        console.log(`✅ Remote video playing for ${user.uid}`);
-        break;
-      } catch (err) {
-        console.warn(`Remote video play attempt ${i + 1} failed:`, err);
-        if (i === retries - 1) {
-          toast({
-            title: "⚠️ Video Decode Issue",
-            description:
-              "Remote video may not display properly due to network or device limitation.",
-            variant: "destructive",
-          });
-        }
-      }
-    }
-  };
+              // Improved retry logic with safety against RECV_VIDEO_DECODE_FAILED
+              const playWithRetry = async (retries = 4) => {
+                for (let i = 0; i < retries; i++) {
+                  try {
+                    await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+                    user.videoTrack?.stop();
+                    user.videoTrack?.play(`player-${user.uid}`);
+                    console.log(`✅ Remote video playing for ${user.uid}`);
+                    break;
+                  } catch (err) {
+                    console.warn(`Remote video play attempt ${i + 1} failed:`, err);
+                    if (i === retries - 1) {
+                      toast({
+                        title: "⚠️ Video Decode Issue",
+                        description:
+                          "Remote video may not display properly due to network or device limitation.",
+                        variant: "destructive",
+                      });
+                    }
+                  }
+                }
+              };
 
-  await playWithRetry();
-}
-
+              await playWithRetry();
+            }
 
             if (mediaType === "audio") {
               user.audioTrack?.play();
@@ -351,55 +382,75 @@ const CallRoom: React.FC = () => {
             });
           } catch (err) {
             console.error("User published error:", err);
-            toast({ 
-              title: "Connection Issue", 
+            toast({
+              title: "Connection Issue",
               description: `Failed to receive ${mediaType} from remote user`,
-              variant: "destructive"
+              variant: "destructive",
             });
           }
         });
 
-        client.on("user-unpublished", (user, mediaType) => {
+        client.on("user-unpublished", (user: any, mediaType: string) => {
           console.log(`User ${user.uid} unpublished ${mediaType}`);
           if (mediaType === "video") {
             document.getElementById(`player-${user.uid}`)?.remove();
           }
         });
 
-        client.on("user-left", (user) => {
+        client.on("user-left", (user: any) => {
           console.log(`User ${user.uid} left`);
           document.getElementById(`player-${user.uid}`)?.remove();
           setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
         });
 
         // Exception handling with recovery
-        client.on("exception", (event) => {
+        client.on("exception", (event: any) => {
           console.warn("Agora exception:", event);
-          
-          if (event.code === 2003) { // SEND_AUDIO_BITRATE_TOO_LOW
+
+          if (event.code === 2003) {
+            // SEND_AUDIO_BITRATE_TOO_LOW
             console.log("Low audio bitrate detected - already optimized");
           }
-          if (event.code === 1005) { // RECV_VIDEO_DECODE_FAILED
-            console.log("Video decode failure - will auto-recover");
+          if (event.code === 1005) {
+            // RECV_VIDEO_DECODE_FAILED
+            console.log("Video decode failure - restarting remote video tracks");
+            // Try to restart remote video tracks to recover decoding
+            setRemoteUsers((prev) => {
+              prev.forEach((u: any) => {
+                try {
+                  u.videoTrack?.stop();
+                  setTimeout(() => {
+                    try {
+                      u.videoTrack?.play(`player-${u.uid}`);
+                    } catch (err) {
+                      console.warn("Retry play failed for", u.uid, err);
+                    }
+                  }, 300);
+                } catch (err) {
+                  console.warn("Error restarting video track for", u.uid, err);
+                }
+              });
+              return prev;
+            });
           }
         });
 
         // Connection state monitoring with recovery
-        client.on("connection-state-change", (curState, prevState, reason) => {
+        client.on("connection-state-change", (curState: any, prevState: any, reason: any) => {
           console.log(`Connection: ${prevState} -> ${curState}, reason: ${reason}`);
           setConnectionState(curState);
-          
+
           if (curState === "DISCONNECTED") {
-            toast({ 
-              title: "Connection Lost", 
+            toast({
+              title: "Connection Lost",
               description: "Attempting to reconnect...",
-              variant: "destructive"
+              variant: "destructive",
             });
             attemptReconnect();
           } else if (curState === "RECONNECTING") {
-            toast({ 
-              title: "Reconnecting...", 
-              description: "Please wait"
+            toast({
+              title: "Reconnecting...",
+              description: "Please wait",
             });
           } else if (curState === "CONNECTED") {
             reconnectAttempts.current = 0;
@@ -410,9 +461,9 @@ const CallRoom: React.FC = () => {
         });
 
         // Notify socket
-        socket?.emit("call:start", { 
-          channelName, 
-          userId: localStorage.getItem("userId") 
+        socket?.emit("call:start", {
+          channelName,
+          userId: localStorage.getItem("userId"),
         });
 
         // Start health check
@@ -429,19 +480,18 @@ const CallRoom: React.FC = () => {
         // Auto-end after time limit
         const msLimit = durationMin * 60 * 1000;
         callLimitTimeoutRef.current = setTimeout(() => {
-          toast({ 
-            title: "⏰ Time's up", 
-            description: "The paid time has ended." 
+          toast({
+            title: "⏰ Time's up",
+            description: "The paid time has ended.",
           });
           endCall(false);
         }, msLimit);
-
       } catch (err: any) {
         console.error("Join error:", err);
-        toast({ 
-          title: "Call Failed", 
-          description: err.message || "Could not join call.", 
-          variant: "destructive" 
+        toast({
+          title: "Call Failed",
+          description: err.message || "Could not join call.",
+          variant: "destructive",
         });
         navigate("/dashboard");
       } finally {
@@ -503,31 +553,35 @@ const CallRoom: React.FC = () => {
 
   const swapViews = () => {
     setIsSwapped(!isSwapped);
-    
+
     // Re-render videos
     setTimeout(() => {
-  const localTarget = isSwapped ? "remote-player" : "local-player";
-  const remoteTarget = isSwapped ? "local-player" : "remote-player";
+      const localTarget = isSwapped ? "remote-player" : "local-player";
+      const remoteTarget = isSwapped ? "local-player" : "remote-player";
 
-  // Re-attach local track
-  if (localVideoRef.current) {
-    localVideoRef.current.stop();
-    setTimeout(() => {
-      try { localVideoRef.current?.play(localTarget); } catch {}
-    }, 200);
-  }
+      // Re-attach local track
+      if (localVideoRef.current) {
+        localVideoRef.current.stop();
+        setTimeout(() => {
+          try {
+            localVideoRef.current?.play(localTarget);
+          } catch {}
+        }, 200);
+      }
 
-  // Re-attach each remote track
-  remoteUsers.forEach(user => {
-    if (user.videoTrack) {
-      user.videoTrack.stop();
-      setTimeout(() => {
-        try { user.videoTrack?.play(remoteTarget); } catch {}
-      }, 200);
-    }
-  });
-}, 300);
-};
+      // Re-attach each remote track
+      remoteUsers.forEach((user) => {
+        if (user.videoTrack) {
+          user.videoTrack.stop();
+          setTimeout(() => {
+            try {
+              user.videoTrack?.play(remoteTarget);
+            } catch {}
+          }, 200);
+        }
+      });
+    }, 300);
+  };
 
   const endCall = async (silent = false) => {
     if (isCleaningUp.current) return;
@@ -552,7 +606,10 @@ const CallRoom: React.FC = () => {
       const client = clientRef.current;
       if (client) {
         try {
-          await client.unpublish();
+          // safe unpublish - pass no args to unpublish all if supported
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          await client.unpublish?.();
         } catch (err) {
           console.warn("Unpublish error:", err);
         }
@@ -596,9 +653,12 @@ const CallRoom: React.FC = () => {
 
   const getNetworkIcon = () => {
     switch (networkQuality) {
-      case "good": return <Wifi className="w-4 h-4 text-green-500" />;
-      case "poor": return <Wifi className="w-4 h-4 text-yellow-500" />;
-      case "bad": return <Wifi className="w-4 h-4 text-red-500" />;
+      case "good":
+        return <Wifi className="w-4 h-4 text-green-500" />;
+      case "poor":
+        return <Wifi className="w-4 h-4 text-yellow-500" />;
+      case "bad":
+        return <Wifi className="w-4 h-4 text-red-500" />;
     }
   };
 
@@ -610,47 +670,41 @@ const CallRoom: React.FC = () => {
     return "Unknown";
   };
 
-
   // 🔹 Drag Handlers for Floating Preview
-const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
-  const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-  const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-  const rect = (e.target as HTMLElement).getBoundingClientRect();
-  dragRef.current = { offsetX: clientX - rect.left, offsetY: clientY - rect.top };
-};
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    const clientX = "touches" in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    dragRef.current = { offsetX: clientX - rect.left, offsetY: clientY - rect.top };
+  };
 
-const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
-  if (!dragRef.current) return;
-  e.preventDefault();
-  const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-  const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-  setPosition({
-    x: Math.max(0, clientX - dragRef.current.offsetX),
-    y: Math.max(0, clientY - dragRef.current.offsetY),
-  });
-};
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!dragRef.current) return;
+    e.preventDefault();
+    const clientX = "touches" in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    setPosition({
+      x: Math.max(0, clientX - dragRef.current.offsetX),
+      y: Math.max(0, clientY - dragRef.current.offsetY),
+    });
+  };
 
-const handleDragEnd = () => {
-  dragRef.current = null;
-};
-
+  const handleDragEnd = () => {
+    dragRef.current = null;
+  };
 
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col relative overflow-hidden">
       {/* Main Video */}
       <div className="flex-1 relative bg-black">
-        <div 
+        <div
           id={isSwapped ? "local-player" : "remote-player"}
           className="w-full h-full flex items-center justify-center"
         >
           {!isSwapped && remoteUsers.length === 0 && (
             <div className="text-center">
-              <div className="text-gray-400 text-lg mb-2 animate-pulse">
-                Waiting for remote user...
-              </div>
-              <div className="text-gray-500 text-sm">
-                {getConnectionStatus()}
-              </div>
+              <div className="text-gray-400 text-lg mb-2 animate-pulse">Waiting for remote user...</div>
+              <div className="text-gray-500 text-sm">{getConnectionStatus()}</div>
             </div>
           )}
         </div>
@@ -659,11 +713,11 @@ const handleDragEnd = () => {
         <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/70 to-transparent p-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full">
-              <Clock className="w-4 h-4" /> 
+              <Clock className="w-4 h-4" />
               <span className="text-sm font-medium">{format(durationSec)}</span>
             </div>
-            <div 
-              className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full" 
+            <div
+              className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full"
               title={`Network: ${networkQuality}`}
             >
               {getNetworkIcon()}
@@ -672,42 +726,23 @@ const handleDragEnd = () => {
         </div>
 
         {/* 🧲 Draggable Small Floating Video */}
-<div
-  className="fixed z-50 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700 cursor-move touch-none select-none"
-  style={{ left: `${position.x}px`, top: `${position.y}px` }}
-  onMouseDown={handleDragStart}
-  onMouseMove={handleDragMove}
-  onMouseUp={handleDragEnd}
-  onMouseLeave={handleDragEnd}
-  onTouchStart={handleDragStart}
-  onTouchMove={handleDragMove}
-  onTouchEnd={handleDragEnd}
->
-  <div id={isSwapped ? "remote-player" : "local-player"} className="w-full h-full">
-    {!joined && !isSwapped && (
-      <div className="flex items-center justify-center h-full text-gray-500 text-xs">
-        Connecting...
-      </div>
-    )}
-  </div>
+        <div
+          className="fixed z-50 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700 cursor-move touch-none select-none"
+          style={{ left: `${position.x}px`, top: `${position.y}px` }}
+          onMouseDown={handleDragStart}
+          onMouseMove={handleDragMove}
+          onMouseUp={handleDragEnd}
+          onMouseLeave={handleDragEnd}
+          onTouchStart={handleDragStart}
+          onTouchMove={handleDragMove}
+          onTouchEnd={handleDragEnd}
+        >
+          <div id={isSwapped ? "remote-player" : "local-player"} className="w-full h-full">
+            {!joined && !isSwapped && (
+              <div className="flex items-center justify-center h-full text-gray-500 text-xs">Connecting...</div>
+            )}
+          </div>
 
-  {/* Swap button */}
-  <button
-    onClick={swapViews}
-    className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 p-1.5 rounded-full transition-all active:scale-95"
-    title="Swap views"
-  >
-    <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4" />
-  </button>
-
-  {/* Label */}
-  <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">
-    {isSwapped ? "Remote" : "You"}
-  </div>
-</div>
-
-
-          
           {/* Swap button */}
           <button
             onClick={swapViews}
@@ -718,11 +753,21 @@ const handleDragEnd = () => {
           </button>
 
           {/* Label */}
-          <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">
-            {isSwapped ? "Remote" : "You"}
-          </div>
+          <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">{isSwapped ? "Remote" : "You"}</div>
         </div>
-      
+
+        {/* Swap button (duplicate for main area) */}
+        <button
+          onClick={swapViews}
+          className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 p-1.5 rounded-full transition-all active:scale-95"
+          title="Swap views"
+        >
+          <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4" />
+        </button>
+
+        {/* Label */}
+        <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">{isSwapped ? "Remote" : "You"}</div>
+      </div>
 
       {/* Bottom Controls */}
       <div className="bg-gray-800 border-t border-gray-700 p-4 pb-6">
@@ -731,9 +776,7 @@ const handleDragEnd = () => {
           <button
             onClick={toggleMic}
             className={`p-3 sm:p-4 rounded-full transition-all active:scale-95 ${
-              isMicOn 
-                ? "bg-gray-700 hover:bg-gray-600" 
-                : "bg-red-600 hover:bg-red-700"
+              isMicOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
             }`}
             title={isMicOn ? "Mute" : "Unmute"}
           >
@@ -744,9 +787,7 @@ const handleDragEnd = () => {
           <button
             onClick={toggleCamera}
             className={`p-3 sm:p-4 rounded-full transition-all active:scale-95 ${
-              isCamOn 
-                ? "bg-gray-700 hover:bg-gray-600" 
-                : "bg-red-600 hover:bg-red-700"
+              isCamOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
             }`}
             title={isCamOn ? "Turn off camera" : "Turn on camera"}
           >
