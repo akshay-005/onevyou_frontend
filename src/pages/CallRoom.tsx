@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AgoraRTC, { IAgoraRTCClient, ILocalVideoTrack, ILocalAudioTrack } from "agora-rtc-sdk-ng";
 import { Button } from "@/components/ui/button";
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "lucide-react";
 import { useSocket } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
 
@@ -28,6 +28,7 @@ const CallRoom: React.FC = () => {
   const [durationSec, setDurationSec] = useState(0);
   const [joined, setJoined] = useState(false);
   const [networkQuality, setNetworkQuality] = useState<"good" | "poor" | "bad">("good");
+  const [isSwapped, setIsSwapped] = useState(false); // Track if views are swapped
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -136,7 +137,7 @@ const CallRoom: React.FC = () => {
         localAudioRef.current = audio;
         localVideoRef.current = video;
 
-        // Play local video
+        // Play local video in small view
         if (video) {
           await video.play("local-player");
         }
@@ -225,7 +226,6 @@ const CallRoom: React.FC = () => {
           console.warn("Agora exception:", event);
           if (event.code === 1005) { // RECV_VIDEO_DECODE_FAILED
             console.log("Attempting to recover from decode failure...");
-            // The SDK usually auto-recovers, but we can log it
           }
         });
 
@@ -329,6 +329,25 @@ const CallRoom: React.FC = () => {
     }
   };
 
+  const swapViews = () => {
+    setIsSwapped(!isSwapped);
+    
+    // Re-render videos in their new positions
+    setTimeout(() => {
+      if (localVideoRef.current) {
+        const targetId = isSwapped ? "remote-player" : "local-player";
+        localVideoRef.current.play(targetId);
+      }
+      
+      remoteUsers.forEach(user => {
+        if (user.videoTrack) {
+          const targetId = isSwapped ? "local-player" : `player-${user.uid}`;
+          user.videoTrack.play(targetId);
+        }
+      });
+    }, 100);
+  };
+
   const endCall = async (silent = false) => {
     if (isCleaningUp.current) return;
     isCleaningUp.current = true;
@@ -399,80 +418,107 @@ const CallRoom: React.FC = () => {
   };
 
   return (
-    <div className="h-screen bg-gray-900 text-white flex flex-col">
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2 p-4">
-        {/* Local video */}
-        <div className="relative bg-black rounded-lg overflow-hidden">
-          <div 
-            id="local-player" 
-            className="w-full h-full flex items-center justify-center"
-          >
-            {!joined && (
-              <div className="text-gray-400 animate-pulse">Connecting...</div>
-            )}
-          </div>
-          <div className="absolute top-2 left-2 bg-black/50 px-2 py-1 rounded text-xs">
-            You
-          </div>
-        </div>
-
-        {/* Remote video */}
-        <div className="relative bg-black rounded-lg overflow-hidden">
-          <div 
-            id="remote-player" 
-            className="w-full h-full flex items-center justify-center"
-          >
-            {remoteUsers.length === 0 && (
-              <p className="text-gray-400 animate-pulse">Waiting for remote user...</p>
-            )}
-          </div>
-          {remoteUsers.length > 0 && (
-            <div className="absolute top-2 left-2 bg-black/50 px-2 py-1 rounded text-xs">
-              Remote User
+    <div className="h-screen bg-gray-900 text-white flex flex-col relative overflow-hidden">
+      {/* Main Video (Remote user by default, or local if swapped) */}
+      <div className="flex-1 relative bg-black">
+        <div 
+          id={isSwapped ? "local-player" : "remote-player"}
+          className="w-full h-full flex items-center justify-center"
+        >
+          {!isSwapped && remoteUsers.length === 0 && (
+            <div className="text-center">
+              <div className="text-gray-400 text-lg mb-2 animate-pulse">
+                Waiting for remote user...
+              </div>
+              <div className="text-gray-500 text-sm">
+                {joined ? "Connected" : "Connecting..."}
+              </div>
             </div>
           )}
         </div>
-      </div>
 
-      {/* Controls */}
-      <div className="p-4 flex flex-col items-center gap-3 bg-gray-800 border-t border-gray-700">
-        <div className="flex items-center gap-4 text-sm text-gray-400">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4" /> 
-            <span>{format(durationSec)}</span>
-          </div>
-          <div className="flex items-center gap-2" title={`Network: ${networkQuality}`}>
-            {getNetworkIcon()}
+        {/* Top Info Bar */}
+        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/70 to-transparent p-4 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full">
+              <Clock className="w-4 h-4" /> 
+              <span className="text-sm font-medium">{format(durationSec)}</span>
+            </div>
+            <div 
+              className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full" 
+              title={`Network: ${networkQuality}`}
+            >
+              {getNetworkIcon()}
+            </div>
           </div>
         </div>
 
-        <div className="flex justify-center gap-4 flex-wrap">
-          <Button 
-            onClick={toggleMic} 
-            variant={isMicOn ? "outline" : "destructive"}
-            className="gap-2"
+        {/* Small Floating Video (Local by default, or remote if swapped) */}
+        <div className="absolute top-20 right-4 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700">
+          <div 
+            id={isSwapped ? "remote-player" : "local-player"}
+            className="w-full h-full"
           >
-            {isMicOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-            {isMicOn ? "Mute" : "Unmute"}
-          </Button>
+            {!joined && !isSwapped && (
+              <div className="flex items-center justify-center h-full text-gray-500 text-xs">
+                Connecting...
+              </div>
+            )}
+          </div>
           
-          <Button 
-            onClick={toggleCamera} 
-            variant={isCamOn ? "outline" : "destructive"}
-            className="gap-2"
+          {/* Swap button on small video */}
+          <button
+            onClick={swapViews}
+            className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 p-1.5 rounded-full transition-all"
+            title="Swap views"
           >
-            {isCamOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
-            {isCamOn ? "Stop Video" : "Start Video"}
-          </Button>
-          
-          <Button 
-            onClick={() => endCall(false)} 
-            variant="destructive"
-            className="gap-2"
+            <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4" />
+          </button>
+
+          {/* Label */}
+          <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">
+            {isSwapped ? "Remote" : "You"}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Controls */}
+      <div className="bg-gray-800 border-t border-gray-700 p-4 pb-6 safe-area-bottom">
+        <div className="flex justify-center items-center gap-3 sm:gap-4 max-w-md mx-auto">
+          {/* Mic Button */}
+          <button
+            onClick={toggleMic}
+            className={`p-3 sm:p-4 rounded-full transition-all ${
+              isMicOn 
+                ? "bg-gray-700 hover:bg-gray-600" 
+                : "bg-red-600 hover:bg-red-700"
+            }`}
+            title={isMicOn ? "Mute" : "Unmute"}
           >
-            <PhoneOff className="w-4 h-4" />
-            Leave Call
-          </Button>
+            {isMicOn ? <Mic className="w-5 h-5 sm:w-6 sm:h-6" /> : <MicOff className="w-5 h-5 sm:w-6 sm:h-6" />}
+          </button>
+
+          {/* Camera Button */}
+          <button
+            onClick={toggleCamera}
+            className={`p-3 sm:p-4 rounded-full transition-all ${
+              isCamOn 
+                ? "bg-gray-700 hover:bg-gray-600" 
+                : "bg-red-600 hover:bg-red-700"
+            }`}
+            title={isCamOn ? "Turn off camera" : "Turn on camera"}
+          >
+            {isCamOn ? <Video className="w-5 h-5 sm:w-6 sm:h-6" /> : <VideoOff className="w-5 h-5 sm:w-6 sm:h-6" />}
+          </button>
+
+          {/* End Call Button */}
+          <button
+            onClick={() => endCall(false)}
+            className="p-3 sm:p-4 rounded-full bg-red-600 hover:bg-red-700 transition-all"
+            title="End call"
+          >
+            <PhoneOff className="w-5 h-5 sm:w-6 sm:h-6" />
+          </button>
         </div>
       </div>
     </div>
