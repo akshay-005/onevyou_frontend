@@ -523,7 +523,7 @@ const CallRoom: React.FC = () => {
     }
   });
 }, 300);
-
+};
 
   const endCall = async (silent = false) => {
     if (isCleaningUp.current) return;
@@ -701,6 +701,7 @@ const handleDragEnd = () => {
     {isSwapped ? "Remote" : "You"}
   </div>
 </div>
+
 
           
           {/* Swap button */}
