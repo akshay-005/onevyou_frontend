@@ -297,45 +297,49 @@ const CallRoom: React.FC = () => {
             if (!subscribeSuccess) throw new Error("Failed to subscribe");
 
             if (mediaType === "video") {
-              // Always request low stream initially for stability
-              try {
-                await client.setRemoteVideoStreamType(user.uid, 1);
-              } catch (err) {
-                console.warn("Low stream request failed:", err);
-              }
+  try {
+    // Always request low-quality stream for stability on poor networks
+    await client.setRemoteVideoStreamType(user.uid, 1);
+  } catch (err) {
+    console.warn("Low stream request failed:", err);
+  }
 
-              // Remove existing player
-              const existingPlayer = document.getElementById(`player-${user.uid}`);
-              if (existingPlayer) existingPlayer.remove();
+  // Remove any old player element before creating a new one
+  const existingPlayer = document.getElementById(`player-${user.uid}`);
+  if (existingPlayer) existingPlayer.remove();
 
-              // Create player
-              const el = document.createElement("div");
-              el.id = `player-${user.uid}`;
-              el.className = "w-full h-full";
-              document.getElementById("remote-player")?.append(el);
+  // Create a new player container
+  const el = document.createElement("div");
+  el.id = `player-${user.uid}`;
+  el.className = "w-full h-full";
+  document.getElementById("remote-player")?.append(el);
 
-              // Play with aggressive retry
-              const playVideo = async () => {
-                for (let i = 0; i < 5; i++) {
-                  try {
-                    await new Promise(r => setTimeout(r, 400 * (i + 1)));
-                    user.videoTrack?.play(`player-${user.uid}`);
-                    console.log(`Video play successful for ${user.uid}`);
-                    break;
-                  } catch (err) {
-                    console.warn(`Video play attempt ${i + 1} failed:`, err);
-                    if (i === 4) {
-                      toast({ 
-                        title: "Video Issue", 
-                        description: "Remote video not displaying",
-                        variant: "destructive"
-                      });
-                    }
-                  }
-                }
-              };
-              await playVideo();
-            }
+  // ✅ Improved retry logic with safety against RECV_VIDEO_DECODE_FAILED
+  const playWithRetry = async (retries = 4) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+        user.videoTrack?.stop();
+        user.videoTrack?.play(`player-${user.uid}`);
+        console.log(`✅ Remote video playing for ${user.uid}`);
+        break;
+      } catch (err) {
+        console.warn(`Remote video play attempt ${i + 1} failed:`, err);
+        if (i === retries - 1) {
+          toast({
+            title: "⚠️ Video Decode Issue",
+            description:
+              "Remote video may not display properly due to network or device limitation.",
+            variant: "destructive",
+          });
+        }
+      }
+    }
+  };
+
+  await playWithRetry();
+}
+
 
             if (mediaType === "audio") {
               user.audioTrack?.play();
