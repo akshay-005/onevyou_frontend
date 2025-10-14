@@ -33,6 +33,10 @@ const CallRoom: React.FC = () => {
   const [networkQuality, setNetworkQuality] = useState<"good" | "poor" | "bad">("good");
   const [isSwapped, setIsSwapped] = useState(false);
   const [connectionState, setConnectionState] = useState<string>("DISCONNECTED");
+  // For draggable small video position
+  const [position, setPosition] = useState({ x: 16, y: 80 });
+  const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
+
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -498,27 +502,28 @@ const CallRoom: React.FC = () => {
     
     // Re-render videos
     setTimeout(() => {
-      if (localVideoRef.current) {
-        const targetId = isSwapped ? "remote-player" : "local-player";
-        try {
-          localVideoRef.current.play(targetId);
-        } catch (err) {
-          console.warn("Swap local video failed:", err);
-        }
-      }
-      
-      remoteUsers.forEach(user => {
-        if (user.videoTrack) {
-          const targetId = isSwapped ? "local-player" : `player-${user.uid}`;
-          try {
-            user.videoTrack.play(targetId);
-          } catch (err) {
-            console.warn("Swap remote video failed:", err);
-          }
-        }
-      });
-    }, 100);
-  };
+  const localTarget = isSwapped ? "remote-player" : "local-player";
+  const remoteTarget = isSwapped ? "local-player" : "remote-player";
+
+  // Re-attach local track
+  if (localVideoRef.current) {
+    localVideoRef.current.stop();
+    setTimeout(() => {
+      try { localVideoRef.current?.play(localTarget); } catch {}
+    }, 200);
+  }
+
+  // Re-attach each remote track
+  remoteUsers.forEach(user => {
+    if (user.videoTrack) {
+      user.videoTrack.stop();
+      setTimeout(() => {
+        try { user.videoTrack?.play(remoteTarget); } catch {}
+      }, 200);
+    }
+  });
+}, 300);
+
 
   const endCall = async (silent = false) => {
     if (isCleaningUp.current) return;
@@ -601,6 +606,31 @@ const CallRoom: React.FC = () => {
     return "Unknown";
   };
 
+
+  // 🔹 Drag Handlers for Floating Preview
+const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+  const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+  const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+  const rect = (e.target as HTMLElement).getBoundingClientRect();
+  dragRef.current = { offsetX: clientX - rect.left, offsetY: clientY - rect.top };
+};
+
+const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+  if (!dragRef.current) return;
+  e.preventDefault();
+  const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+  const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+  setPosition({
+    x: Math.max(0, clientX - dragRef.current.offsetX),
+    y: Math.max(0, clientY - dragRef.current.offsetY),
+  });
+};
+
+const handleDragEnd = () => {
+  dragRef.current = null;
+};
+
+
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col relative overflow-hidden">
       {/* Main Video */}
@@ -637,18 +667,41 @@ const CallRoom: React.FC = () => {
           </div>
         </div>
 
-        {/* Small Floating Video */}
-        <div className="absolute top-20 right-4 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700">
-          <div 
-            id={isSwapped ? "remote-player" : "local-player"}
-            className="w-full h-full"
-          >
-            {!joined && !isSwapped && (
-              <div className="flex items-center justify-center h-full text-gray-500 text-xs">
-                Connecting...
-              </div>
-            )}
-          </div>
+        {/* 🧲 Draggable Small Floating Video */}
+<div
+  className="fixed z-50 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700 cursor-move touch-none select-none"
+  style={{ left: `${position.x}px`, top: `${position.y}px` }}
+  onMouseDown={handleDragStart}
+  onMouseMove={handleDragMove}
+  onMouseUp={handleDragEnd}
+  onMouseLeave={handleDragEnd}
+  onTouchStart={handleDragStart}
+  onTouchMove={handleDragMove}
+  onTouchEnd={handleDragEnd}
+>
+  <div id={isSwapped ? "remote-player" : "local-player"} className="w-full h-full">
+    {!joined && !isSwapped && (
+      <div className="flex items-center justify-center h-full text-gray-500 text-xs">
+        Connecting...
+      </div>
+    )}
+  </div>
+
+  {/* Swap button */}
+  <button
+    onClick={swapViews}
+    className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 p-1.5 rounded-full transition-all active:scale-95"
+    title="Swap views"
+  >
+    <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4" />
+  </button>
+
+  {/* Label */}
+  <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">
+    {isSwapped ? "Remote" : "You"}
+  </div>
+</div>
+
           
           {/* Swap button */}
           <button
