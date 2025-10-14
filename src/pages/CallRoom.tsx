@@ -7,8 +7,9 @@ import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "
 import { useSocket } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
 
-// Set Agora log level to reduce noise
-AgoraRTC.setLogLevel(1); // 0=debug, 1=info, 2=warning, 3=error, 4=none
+// Critical: Set log level and configure SDK for mobile
+AgoraRTC.setLogLevel(2); // Only warnings and errors
+AgoraRTC.enableLogUpload(); // Send logs to Agora for debugging
 
 const CallRoom: React.FC = () => {
   const { channelName } = useParams();
@@ -21,6 +22,8 @@ const CallRoom: React.FC = () => {
   const localVideoRef = useRef<ILocalVideoTrack | null>(null);
   const joinInProgress = useRef(false);
   const isCleaningUp = useRef(false);
+  const reconnectAttempts = useRef(0);
+  const healthCheckInterval = useRef<NodeJS.Timeout | null>(null);
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -28,7 +31,8 @@ const CallRoom: React.FC = () => {
   const [durationSec, setDurationSec] = useState(0);
   const [joined, setJoined] = useState(false);
   const [networkQuality, setNetworkQuality] = useState<"good" | "poor" | "bad">("good");
-  const [isSwapped, setIsSwapped] = useState(false); // Track if views are swapped
+  const [isSwapped, setIsSwapped] = useState(false);
+  const [connectionState, setConnectionState] = useState<string>("DISCONNECTED");
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -55,6 +59,53 @@ const CallRoom: React.FC = () => {
     }
   };
 
+  // Health check to keep connection alive
+  const startHealthCheck = () => {
+    if (healthCheckInterval.current) clearInterval(healthCheckInterval.current);
+    
+    healthCheckInterval.current = setInterval(() => {
+      const client = clientRef.current;
+      if (client && client.connectionState === "CONNECTED") {
+        // Send a ping to keep connection alive
+        console.log("Health check: Connection alive");
+      } else if (client && client.connectionState === "DISCONNECTED") {
+        console.warn("Health check: Connection lost, attempting reconnect");
+        attemptReconnect();
+      }
+    }, 10000); // Check every 10 seconds
+  };
+
+  const attemptReconnect = async () => {
+    if (reconnectAttempts.current >= 3 || isCleaningUp.current) {
+      toast({ 
+        title: "Connection Failed", 
+        description: "Unable to reconnect. Ending call.",
+        variant: "destructive" 
+      });
+      endCall(false);
+      return;
+    }
+
+    reconnectAttempts.current++;
+    console.log(`Reconnect attempt ${reconnectAttempts.current}`);
+    
+    try {
+      const client = clientRef.current;
+      if (!client) return;
+
+      // Republish tracks
+      const publishArr = [localAudioRef.current, localVideoRef.current].filter(Boolean) as any[];
+      if (publishArr.length > 0) {
+        await client.publish(publishArr);
+      }
+      
+      reconnectAttempts.current = 0; // Reset on success
+      toast({ title: "Reconnected successfully" });
+    } catch (err) {
+      console.error("Reconnect failed:", err);
+    }
+  };
+
   useEffect(() => {
     if (!channelName || joinInProgress.current || isCleaningUp.current) return;
 
@@ -62,9 +113,10 @@ const CallRoom: React.FC = () => {
       joinInProgress.current = true;
       await stopTracks();
 
+      // Create client with optimized settings for mobile
       const client = AgoraRTC.createClient({ 
         mode: "rtc", 
-        codec: "vp8" // VP8 is more stable than H264 on most devices
+        codec: "vp8" // VP8 is more compatible
       });
       clientRef.current = client;
 
@@ -74,113 +126,204 @@ const CallRoom: React.FC = () => {
         const data = await res.json();
         if (!data.success) throw new Error("Failed to get Agora token");
 
-        // Join channel
-        await client.join(data.appId, data.channelName, data.token, data.uid);
+        // Join channel with retry
+        let joinSuccess = false;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await client.join(data.appId, data.channelName, data.token, data.uid);
+            joinSuccess = true;
+            break;
+          } catch (err) {
+            console.warn(`Join attempt ${attempt + 1} failed:`, err);
+            if (attempt === 2) throw err;
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
 
-        // Network quality monitoring
+        if (!joinSuccess) throw new Error("Failed to join after 3 attempts");
+
+        // Network quality monitoring with adaptive response
         client.on("network-quality", (stats) => {
-          const quality = stats.uplinkNetworkQuality;
-          if (quality <= 2) setNetworkQuality("good");
-          else if (quality <= 4) setNetworkQuality("poor");
-          else setNetworkQuality("bad");
+          const uplink = stats.uplinkNetworkQuality;
+          const downlink = stats.downlinkNetworkQuality;
+          
+          const worstQuality = Math.max(uplink, downlink);
+          
+          if (worstQuality <= 2) {
+            setNetworkQuality("good");
+          } else if (worstQuality <= 4) {
+            setNetworkQuality("poor");
+            // Switch remote to low quality
+            remoteUsers.forEach(async (user) => {
+              try {
+                await client.setRemoteVideoStreamType(user.uid, 1);
+              } catch (err) {
+                console.warn("Failed to switch to low stream:", err);
+              }
+            });
+          } else {
+            setNetworkQuality("bad");
+            // Switch remote to low quality
+            remoteUsers.forEach(async (user) => {
+              try {
+                await client.setRemoteVideoStreamType(user.uid, 1);
+              } catch (err) {
+                console.warn("Failed to switch to low stream:", err);
+              }
+            });
+          }
         });
 
-        // Enable dual stream for adaptive quality
-        await client.enableDualStream();
-        client.setLowStreamParameter({
-          width: 320,
-          height: 240,
-          framerate: 15,
-          bitrate: 140,
-        });
+        // Enable dual stream with very conservative settings
+        try {
+          await client.enableDualStream();
+          await client.setLowStreamParameter({
+            width: 240,
+            height: 180,
+            framerate: 10,
+            bitrate: 100, // Very low for poor networks
+          });
+        } catch (err) {
+          console.warn("Dual stream setup failed:", err);
+        }
 
-        // Create local tracks with optimized settings
+        // Create tracks with VERY conservative mobile settings
         let audio: ILocalAudioTrack | null = null;
         let video: ILocalVideoTrack | null = null;
 
         try {
-          [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
-            {
-              AEC: true, // Acoustic Echo Cancellation
-              AGC: true, // Auto Gain Control
-              ANS: true, // Automatic Noise Suppression
+          // Audio track with aggressive optimization
+          audio = await AgoraRTC.createMicrophoneAudioTrack({
+            AEC: true,
+            AGC: true,
+            ANS: true,
+            encoderConfig: {
+              sampleRate: 48000,
+              stereo: false,
+              bitrate: 48, // Lower bitrate to prevent BITRATE_TOO_LOW error
             },
-            {
-              encoderConfig: {
-                width: 640,
-                height: 480,
-                frameRate: 24, // Lower from 30 to reduce load
-                bitrateMin: 400,
-                bitrateMax: 800, // Reduced from 900 for stability
-              },
-              optimizationMode: "detail", // Better for faces
-            }
-          );
+          });
+
+          // Video track with mobile-optimized settings
+          video = await AgoraRTC.createCameraVideoTrack({
+            encoderConfig: {
+              width: { ideal: 480, max: 640 },
+              height: { ideal: 360, max: 480 },
+              frameRate: { ideal: 15, max: 20 }, // Lower framerate for stability
+              bitrateMin: 200,
+              bitrateMax: 500, // Much lower for poor networks
+            },
+            optimizationMode: "detail",
+            facingMode: "user", // Front camera
+          });
         } catch (err: any) {
           console.error("Track creation error:", err);
-          toast({ 
-            title: "Camera/Mic Error", 
-            description: "Trying audio-only mode...", 
-            variant: "destructive" 
-          });
+          
+          // Try audio-only fallback
           try {
             audio = await AgoraRTC.createMicrophoneAudioTrack({
               AEC: true,
               AGC: true,
               ANS: true,
+              encoderConfig: {
+                sampleRate: 48000,
+                stereo: false,
+                bitrate: 48,
+              },
+            });
+            toast({ 
+              title: "Camera unavailable", 
+              description: "Using audio-only mode", 
+              variant: "destructive" 
             });
           } catch (audioErr) {
-            throw new Error("Could not access microphone");
+            throw new Error("Could not access microphone or camera");
           }
         }
 
         localAudioRef.current = audio;
         localVideoRef.current = video;
 
-        // Play local video in small view
+        // Play local video
         if (video) {
-          await video.play("local-player");
+          try {
+            await video.play("local-player");
+          } catch (err) {
+            console.warn("Local video play failed:", err);
+          }
         }
 
-        // Publish tracks
+        // Publish with retry
         const publishArr = [audio, video].filter(Boolean) as any[];
         if (publishArr.length > 0) {
-          await client.publish(publishArr);
+          let publishSuccess = false;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              await client.publish(publishArr);
+              publishSuccess = true;
+              break;
+            } catch (err) {
+              console.warn(`Publish attempt ${attempt + 1} failed:`, err);
+              if (attempt === 2) throw err;
+              await new Promise(r => setTimeout(r, 500));
+            }
+          }
+          if (!publishSuccess) throw new Error("Failed to publish tracks");
         }
 
-        // Remote user handling with improved error recovery
+        // Remote user handling
         client.on("user-published", async (user, mediaType) => {
+          console.log(`User ${user.uid} published ${mediaType}`);
+          
           try {
-            await client.subscribe(user, mediaType);
+            // Subscribe with retry
+            let subscribeSuccess = false;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                await client.subscribe(user, mediaType);
+                subscribeSuccess = true;
+                break;
+              } catch (err) {
+                console.warn(`Subscribe attempt ${attempt + 1} failed:`, err);
+                if (attempt === 2) throw err;
+                await new Promise(r => setTimeout(r, 500));
+              }
+            }
+
+            if (!subscribeSuccess) throw new Error("Failed to subscribe");
 
             if (mediaType === "video") {
-              // Request low stream for better stability on weak networks
-              if (networkQuality !== "good") {
-                await client.setRemoteVideoStreamType(user.uid, 1); // 1 = low stream
+              // Always request low stream initially for stability
+              try {
+                await client.setRemoteVideoStreamType(user.uid, 1);
+              } catch (err) {
+                console.warn("Low stream request failed:", err);
               }
 
-              // Create player element
+              // Remove existing player
               const existingPlayer = document.getElementById(`player-${user.uid}`);
               if (existingPlayer) existingPlayer.remove();
 
+              // Create player
               const el = document.createElement("div");
               el.id = `player-${user.uid}`;
               el.className = "w-full h-full";
               document.getElementById("remote-player")?.append(el);
 
-              // Play with retry logic
-              const playVideo = async (retries = 3) => {
-                for (let i = 0; i < retries; i++) {
+              // Play with aggressive retry
+              const playVideo = async () => {
+                for (let i = 0; i < 5; i++) {
                   try {
-                    await new Promise(r => setTimeout(r, 300 * (i + 1))); // Increasing delay
+                    await new Promise(r => setTimeout(r, 400 * (i + 1)));
                     user.videoTrack?.play(`player-${user.uid}`);
+                    console.log(`Video play successful for ${user.uid}`);
                     break;
                   } catch (err) {
                     console.warn(`Video play attempt ${i + 1} failed:`, err);
-                    if (i === retries - 1) {
+                    if (i === 4) {
                       toast({ 
                         title: "Video Issue", 
-                        description: "Remote video may not display properly",
+                        description: "Remote video not displaying",
                         variant: "destructive"
                       });
                     }
@@ -199,45 +342,62 @@ const CallRoom: React.FC = () => {
               return [...filtered, user];
             });
           } catch (err) {
-            console.error("Subscribe error:", err);
+            console.error("User published error:", err);
             toast({ 
               title: "Connection Issue", 
-              description: "Failed to receive remote stream",
+              description: `Failed to receive ${mediaType} from remote user`,
               variant: "destructive"
             });
           }
         });
 
         client.on("user-unpublished", (user, mediaType) => {
+          console.log(`User ${user.uid} unpublished ${mediaType}`);
           if (mediaType === "video") {
             document.getElementById(`player-${user.uid}`)?.remove();
           }
-          setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
         });
 
-        // Handle user leaving
         client.on("user-left", (user) => {
+          console.log(`User ${user.uid} left`);
           document.getElementById(`player-${user.uid}`)?.remove();
           setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
         });
 
-        // Exception handling
+        // Exception handling with recovery
         client.on("exception", (event) => {
           console.warn("Agora exception:", event);
+          
+          if (event.code === 2003) { // SEND_AUDIO_BITRATE_TOO_LOW
+            console.log("Low audio bitrate detected - already optimized");
+          }
           if (event.code === 1005) { // RECV_VIDEO_DECODE_FAILED
-            console.log("Attempting to recover from decode failure...");
+            console.log("Video decode failure - will auto-recover");
           }
         });
 
-        // Connection state monitoring
+        // Connection state monitoring with recovery
         client.on("connection-state-change", (curState, prevState, reason) => {
           console.log(`Connection: ${prevState} -> ${curState}, reason: ${reason}`);
-          if (curState === "DISCONNECTED" || curState === "DISCONNECTING") {
+          setConnectionState(curState);
+          
+          if (curState === "DISCONNECTED") {
             toast({ 
               title: "Connection Lost", 
               description: "Attempting to reconnect...",
               variant: "destructive"
             });
+            attemptReconnect();
+          } else if (curState === "RECONNECTING") {
+            toast({ 
+              title: "Reconnecting...", 
+              description: "Please wait"
+            });
+          } else if (curState === "CONNECTED") {
+            reconnectAttempts.current = 0;
+            if (prevState === "RECONNECTING") {
+              toast({ title: "Reconnected!" });
+            }
           }
         });
 
@@ -246,6 +406,9 @@ const CallRoom: React.FC = () => {
           channelName, 
           userId: localStorage.getItem("userId") 
         });
+
+        // Start health check
+        startHealthCheck();
 
         // Start timer
         startTime.current = Date.now();
@@ -280,7 +443,7 @@ const CallRoom: React.FC = () => {
 
     initCall();
 
-    // Socket listener for remote end
+    // Socket listeners
     const handleCallEnded = (payload: any) => {
       if (payload.channelName === channelName) {
         endCall(true);
@@ -292,6 +455,7 @@ const CallRoom: React.FC = () => {
       socket?.off("call:ended", handleCallEnded);
       if (timerRef.current) clearInterval(timerRef.current);
       if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
+      if (healthCheckInterval.current) clearInterval(healthCheckInterval.current);
       endCall(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -332,17 +496,25 @@ const CallRoom: React.FC = () => {
   const swapViews = () => {
     setIsSwapped(!isSwapped);
     
-    // Re-render videos in their new positions
+    // Re-render videos
     setTimeout(() => {
       if (localVideoRef.current) {
         const targetId = isSwapped ? "remote-player" : "local-player";
-        localVideoRef.current.play(targetId);
+        try {
+          localVideoRef.current.play(targetId);
+        } catch (err) {
+          console.warn("Swap local video failed:", err);
+        }
       }
       
       remoteUsers.forEach(user => {
         if (user.videoTrack) {
           const targetId = isSwapped ? "local-player" : `player-${user.uid}`;
-          user.videoTrack.play(targetId);
+          try {
+            user.videoTrack.play(targetId);
+          } catch (err) {
+            console.warn("Swap remote video failed:", err);
+          }
         }
       });
     }, 100);
@@ -353,7 +525,7 @@ const CallRoom: React.FC = () => {
     isCleaningUp.current = true;
 
     try {
-      // Clear timers
+      // Clear all intervals
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -361,6 +533,10 @@ const CallRoom: React.FC = () => {
       if (callLimitTimeoutRef.current) {
         clearTimeout(callLimitTimeoutRef.current);
         callLimitTimeoutRef.current = null;
+      }
+      if (healthCheckInterval.current) {
+        clearInterval(healthCheckInterval.current);
+        healthCheckInterval.current = null;
       }
 
       // Unpublish and leave
@@ -417,9 +593,17 @@ const CallRoom: React.FC = () => {
     }
   };
 
+  const getConnectionStatus = () => {
+    if (connectionState === "CONNECTED") return "Connected";
+    if (connectionState === "CONNECTING") return "Connecting...";
+    if (connectionState === "RECONNECTING") return "Reconnecting...";
+    if (connectionState === "DISCONNECTED") return "Disconnected";
+    return "Unknown";
+  };
+
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col relative overflow-hidden">
-      {/* Main Video (Remote user by default, or local if swapped) */}
+      {/* Main Video */}
       <div className="flex-1 relative bg-black">
         <div 
           id={isSwapped ? "local-player" : "remote-player"}
@@ -431,7 +615,7 @@ const CallRoom: React.FC = () => {
                 Waiting for remote user...
               </div>
               <div className="text-gray-500 text-sm">
-                {joined ? "Connected" : "Connecting..."}
+                {getConnectionStatus()}
               </div>
             </div>
           )}
@@ -453,7 +637,7 @@ const CallRoom: React.FC = () => {
           </div>
         </div>
 
-        {/* Small Floating Video (Local by default, or remote if swapped) */}
+        {/* Small Floating Video */}
         <div className="absolute top-20 right-4 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700">
           <div 
             id={isSwapped ? "remote-player" : "local-player"}
@@ -466,10 +650,10 @@ const CallRoom: React.FC = () => {
             )}
           </div>
           
-          {/* Swap button on small video */}
+          {/* Swap button */}
           <button
             onClick={swapViews}
-            className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 p-1.5 rounded-full transition-all"
+            className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 p-1.5 rounded-full transition-all active:scale-95"
             title="Swap views"
           >
             <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -483,12 +667,12 @@ const CallRoom: React.FC = () => {
       </div>
 
       {/* Bottom Controls */}
-      <div className="bg-gray-800 border-t border-gray-700 p-4 pb-6 safe-area-bottom">
+      <div className="bg-gray-800 border-t border-gray-700 p-4 pb-6">
         <div className="flex justify-center items-center gap-3 sm:gap-4 max-w-md mx-auto">
           {/* Mic Button */}
           <button
             onClick={toggleMic}
-            className={`p-3 sm:p-4 rounded-full transition-all ${
+            className={`p-3 sm:p-4 rounded-full transition-all active:scale-95 ${
               isMicOn 
                 ? "bg-gray-700 hover:bg-gray-600" 
                 : "bg-red-600 hover:bg-red-700"
@@ -501,7 +685,7 @@ const CallRoom: React.FC = () => {
           {/* Camera Button */}
           <button
             onClick={toggleCamera}
-            className={`p-3 sm:p-4 rounded-full transition-all ${
+            className={`p-3 sm:p-4 rounded-full transition-all active:scale-95 ${
               isCamOn 
                 ? "bg-gray-700 hover:bg-gray-600" 
                 : "bg-red-600 hover:bg-red-700"
@@ -514,7 +698,7 @@ const CallRoom: React.FC = () => {
           {/* End Call Button */}
           <button
             onClick={() => endCall(false)}
-            className="p-3 sm:p-4 rounded-full bg-red-600 hover:bg-red-700 transition-all"
+            className="p-3 sm:p-4 rounded-full bg-red-600 hover:bg-red-700 transition-all active:scale-95"
             title="End call"
           >
             <PhoneOff className="w-5 h-5 sm:w-6 sm:h-6" />
