@@ -717,7 +717,7 @@ const handleDragEnd = () => {
             {isSwapped ? "Remote" : "You"}
           </div>
         </div>
-      </div>
+      
 
       {/* Bottom Controls */}
       <div className="bg-gray-800 border-t border-gray-700 p-4 pb-6">
