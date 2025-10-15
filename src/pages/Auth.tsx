@@ -75,19 +75,27 @@ const Auth = () => {
   };
 
   const checkUserExists = async (identifier: string) => {
-    try {
-      const res = await fetch(ENDPOINT.checkUser, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier }),
-      });
-      const data = await res.json();
-      return data.exists === true;
-    } catch (err) {
-      console.warn("checkUserExists error", err);
-      return false;
-    }
-  };
+  try {
+    // Detect whether the identifier is email or phone
+    const payload = identifier.includes("@")
+      ? { email: identifier }
+      : { phoneNumber: identifier };
+
+    const res = await fetch(ENDPOINT.checkUser, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload), // ✅ correct key now
+    });
+
+    const data = await res.json();
+    console.log("checkUser response:", data);
+    return data.exists === true;
+  } catch (err) {
+    console.warn("checkUserExists error", err);
+    return false;
+  }
+};
+
 
   // SEND OTP used only for phone-based signup/login flows (keeps same backend contract)
   const handleSendOTP = async () => {
