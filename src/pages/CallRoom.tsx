@@ -6,9 +6,7 @@ import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "
 import { useSocket } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
 
-// 🔥 CRITICAL: Disable log upload (causes connection issues on mobile)
-AgoraRTC.setLogLevel(3); // Only errors
-// DO NOT enable log upload - it causes connection problems
+AgoraRTC.setLogLevel(3); // Errors only
 
 const CallRoom: React.FC = () => {
   const { channelName } = useParams();
@@ -22,6 +20,8 @@ const CallRoom: React.FC = () => {
   const joinInProgress = useRef(false);
   const isCleaningUp = useRef(false);
   const wsHealthInterval = useRef<NodeJS.Timeout | null>(null);
+  const tokenRef = useRef<{ token: string; expireTime: number } | null>(null);
+  const subscribedUsers = useRef<Set<number>>(new Set());
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -30,6 +30,7 @@ const CallRoom: React.FC = () => {
   const [joined, setJoined] = useState(false);
   const [networkQuality, setNetworkQuality] = useState<"good" | "poor" | "bad">("good");
   const [isSwapped, setIsSwapped] = useState(false);
+  const [callAccepted, setCallAccepted] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -57,33 +58,64 @@ const CallRoom: React.FC = () => {
     }
   };
 
-  // 🔥 WebSocket keep-alive mechanism
+  // Refresh token before expiry (token is valid for 24 hours, refresh every 20 hours)
+  const refreshTokenIfNeeded = async () => {
+    try {
+      if (!tokenRef.current) return;
+      const now = Date.now();
+      const timeUntilExpiry = tokenRef.current.expireTime - now;
+
+      // If less than 30 minutes left, refresh
+      if (timeUntilExpiry < 30 * 60 * 1000) {
+        console.log("Refreshing Agora token...");
+        const res = await fetch(
+          `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
+        );
+        const data = await res.json();
+        if (data.success) {
+          tokenRef.current = { token: data.token, expireTime: now + 24 * 60 * 60 * 1000 };
+          const client = clientRef.current;
+          if (client) {
+            try {
+              // Renew token in SDK
+              await client.renewToken(data.token);
+              console.log("Token refreshed successfully");
+            } catch (err) {
+              console.warn("Token renewal failed:", err);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Token refresh error:", err);
+    }
+  };
+
+  // WebSocket keep-alive with token refresh
   const startWebSocketHealth = () => {
     if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
 
-    wsHealthInterval.current = setInterval(() => {
+    wsHealthInterval.current = setInterval(async () => {
       const client = clientRef.current;
       if (!client || client.connectionState !== "CONNECTED") return;
 
       const now = Date.now();
       const timeSinceLastPing = now - lastPingTime.current;
 
-      // If no ping response for 45 seconds, something is wrong
       if (timeSinceLastPing > 45000) {
-        console.warn("⚠️ WS appears stuck, forcing reconnection");
-        // Don't end call, let Agora SDK handle reconnection
+        console.warn("WS appears stuck");
         lastPingTime.current = now;
       }
 
-      // Send a lightweight stats request to keep WS alive
       try {
-        // @ts-ignore - getRTCStats keeps connection active
+        // @ts-ignore
         client.getRTCStats?.();
       } catch (e) {
-        console.warn("WS health check failed:", e);
+        console.warn("Health check failed:", e);
       }
 
       lastPingTime.current = now;
+      await refreshTokenIfNeeded();
     }, 15000); // Every 15 seconds
   };
 
@@ -94,21 +126,28 @@ const CallRoom: React.FC = () => {
       joinInProgress.current = true;
       await stopTracks();
 
-      // 🔥 FORCE h264 codec (more stable than VP8 on most mobile devices)
       const client = AgoraRTC.createClient({
         mode: "rtc",
         codec: "h264",
       });
       clientRef.current = client;
+      subscribedUsers.current.clear();
 
       try {
-        const res = await fetch(`${API_BASE}/api/agora/token?channelName=${channelName}`);
-        const data = await res.json();
-        if (!data.success) throw new Error("Failed to get token");
+        // Fetch token WITH duration parameter
+        const tokenRes = await fetch(
+          `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
+        );
+        const tokenData = await tokenRes.json();
+        if (!tokenData.success) throw new Error("Failed to get token");
 
-        // Join with single attempt (retries cause more issues)
-        await client.join(data.appId, data.channelName, data.token, data.uid);
-        console.log("✅ Joined channel");
+        // Store token with expiry time
+        const now = Date.now();
+        tokenRef.current = { token: tokenData.token, expireTime: now + 24 * 60 * 60 * 1000 };
+
+        // Join channel
+        await client.join(tokenData.appId, channelName, tokenData.token, tokenData.uid);
+        console.log("Joined channel successfully");
 
         // Network monitoring
         client.on("network-quality", (stats) => {
@@ -127,7 +166,7 @@ const CallRoom: React.FC = () => {
           }
         });
 
-        // Enable dual stream AFTER successful join
+        // Enable dual stream AFTER join
         try {
           await client.enableDualStream();
           client.setLowStreamParameter({
@@ -140,12 +179,11 @@ const CallRoom: React.FC = () => {
           console.warn("Dual stream failed:", err);
         }
 
-        // 🔥 CRITICAL: Ultra-conservative track settings for mobile stability
+        // Create tracks
         let audio: ILocalAudioTrack | null = null;
         let video: ILocalVideoTrack | null = null;
 
         try {
-          // Separate track creation for better error handling
           audio = await AgoraRTC.createMicrophoneAudioTrack({
             AEC: true,
             AGC: true,
@@ -153,7 +191,7 @@ const CallRoom: React.FC = () => {
             encoderConfig: {
               sampleRate: 48000,
               stereo: false,
-              bitrate: 64, // Slightly higher to avoid BITRATE_TOO_LOW
+              bitrate: 64,
             },
           });
 
@@ -161,16 +199,15 @@ const CallRoom: React.FC = () => {
             encoderConfig: {
               width: 640,
               height: 480,
-              frameRate: 15, // Stable framerate
+              frameRate: 15,
               bitrateMin: 400,
-              bitrateMax: 900, // Enough bitrate to prevent decode errors
+              bitrateMax: 900,
             },
-            optimizationMode: "motion", // Better for mobile
+            optimizationMode: "motion",
             facingMode: "user",
           });
         } catch (err) {
           console.error("Track error:", err);
-          // Audio-only fallback
           try {
             if (!audio) {
               audio = await AgoraRTC.createMicrophoneAudioTrack({
@@ -192,7 +229,6 @@ const CallRoom: React.FC = () => {
         localAudioRef.current = audio;
         localVideoRef.current = video;
 
-        // Play local video
         if (video) {
           try {
             video.play("local-player");
@@ -205,18 +241,33 @@ const CallRoom: React.FC = () => {
         const tracks = [audio, video].filter(Boolean) as any[];
         if (tracks.length > 0) {
           await client.publish(tracks);
-          console.log("✅ Published tracks");
+          console.log("Published tracks");
         }
 
-        // 🔥 Remote user handlers with improved stability
+        // Remote user handlers - CRITICAL: Wait for connection to be stable
         client.on("user-published", async (user, mediaType) => {
-          console.log(`📥 User ${user.uid} published ${mediaType}`);
+          console.log(`User ${user.uid} published ${mediaType}`);
+
+          // Don't subscribe if already subscribed
+          if (subscribedUsers.current.has(user.uid) && mediaType === "video") {
+            console.log(`Already subscribed to ${user.uid}`);
+            return;
+          }
 
           try {
+            // Wait a bit before subscribing to ensure connection is stable
+            await new Promise((r) => setTimeout(r, 500));
+
+            // Check connection state before subscribing
+            if (client.connectionState !== "CONNECTED") {
+              console.warn("Connection not ready for subscription");
+              return;
+            }
+
             await client.subscribe(user, mediaType);
+            subscribedUsers.current.add(user.uid);
 
             if (mediaType === "video") {
-              // Request low stream immediately for mobile
               try {
                 await client.setRemoteVideoStreamType(user.uid, 1);
               } catch {}
@@ -234,14 +285,14 @@ const CallRoom: React.FC = () => {
               div.className = "w-full h-full";
               container.appendChild(div);
 
-              // 🔥 Play with delay to avoid decode race condition
+              // Play with delay
               setTimeout(() => {
                 try {
                   user.videoTrack?.play(`player-${user.uid}`);
-                  console.log(`✅ Playing video from ${user.uid}`);
+                  console.log(`Playing video from ${user.uid}`);
                 } catch (err) {
                   console.warn("Video play failed:", err);
-                  // Retry once more after longer delay
+                  // Retry
                   setTimeout(() => {
                     try {
                       user.videoTrack?.play(`player-${user.uid}`);
@@ -267,31 +318,33 @@ const CallRoom: React.FC = () => {
             });
           } catch (err) {
             console.error("Subscribe error:", err);
+            subscribedUsers.current.delete(user.uid);
           }
         });
 
         client.on("user-unpublished", (user, mediaType) => {
           if (mediaType === "video") {
             document.getElementById(`player-${user.uid}`)?.remove();
+            subscribedUsers.current.delete(user.uid);
           }
         });
 
         client.on("user-left", (user) => {
           console.log(`User ${user.uid} left`);
           document.getElementById(`player-${user.uid}`)?.remove();
+          subscribedUsers.current.delete(user.uid);
           setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
         });
 
-        // Exception handler (don't overreact to warnings)
         client.on("exception", (event) => {
           if (event.code === 1005) {
-            console.warn("Decode issue (will auto-recover)");
+            console.warn("Decode issue");
           }
         });
 
         // Connection state handler
         client.on("connection-state-change", (curState, prevState) => {
-          console.log(`Connection: ${prevState} → ${curState}`);
+          console.log(`Connection: ${prevState} -> ${curState}`);
 
           if (curState === "DISCONNECTED" && prevState !== "DISCONNECTING") {
             toast({
@@ -303,7 +356,7 @@ const CallRoom: React.FC = () => {
           } else if (curState === "RECONNECTING") {
             toast({ title: "Reconnecting..." });
           } else if (curState === "CONNECTED" && prevState === "RECONNECTING") {
-            toast({ title: "✅ Reconnected" });
+            toast({ title: "Reconnected" });
           }
         });
 
@@ -313,21 +366,23 @@ const CallRoom: React.FC = () => {
           userId: localStorage.getItem("userId"),
         });
 
-        // Start WS health check
         startWebSocketHealth();
 
-        // Start call timer
+        // Start timer
         startTime.current = Date.now();
         timerRef.current = setInterval(() => {
           setDurationSec(Math.floor((Date.now() - startTime.current) / 1000));
         }, 1000);
         setJoined(true);
+        setCallAccepted(true);
 
-        // Auto-end timer
-        callLimitTimeoutRef.current = setTimeout(() => {
-          toast({ title: "⏰ Time's up" });
-          endCall(false);
-        }, durationMin * 60 * 1000);
+        // Auto-end timer - CRITICAL: Only if duration is set
+        if (durationMin > 0) {
+          callLimitTimeoutRef.current = setTimeout(() => {
+            toast({ title: "Time's up" });
+            endCall(false);
+          }, durationMin * 60 * 1000);
+        }
       } catch (err: any) {
         console.error("Init error:", err);
         toast({
@@ -344,7 +399,10 @@ const CallRoom: React.FC = () => {
     initCall();
 
     const handleCallEnded = (payload: any) => {
-      if (payload.channelName === channelName) endCall(true);
+      if (payload.channelName === channelName) {
+        console.log("Received call:ended from server");
+        endCall(true);
+      }
     };
     socket?.on("call:ended", handleCallEnded);
 
@@ -387,7 +445,6 @@ const CallRoom: React.FC = () => {
     setIsSwapped(newSwapped);
 
     setTimeout(() => {
-      // Replay local video
       if (localVideoRef.current) {
         try {
           localVideoRef.current.stop();
@@ -397,7 +454,6 @@ const CallRoom: React.FC = () => {
         } catch {}
       }
 
-      // Replay remote videos
       remoteUsers.forEach((user) => {
         if (user.videoTrack) {
           try {
@@ -433,6 +489,8 @@ const CallRoom: React.FC = () => {
       await stopTracks();
       setJoined(false);
       setRemoteUsers([]);
+      setCallAccepted(false);
+      subscribedUsers.current.clear();
 
       socket?.emit("call:end", { channelName, durationSec });
 
@@ -463,7 +521,6 @@ const CallRoom: React.FC = () => {
 
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col relative overflow-hidden">
-      {/* Main Video */}
       <div className="flex-1 relative bg-black">
         <div id={isSwapped ? "local-player" : "remote-player"} className="w-full h-full flex items-center justify-center">
           {!isSwapped && remoteUsers.length === 0 && (
@@ -474,7 +531,6 @@ const CallRoom: React.FC = () => {
           )}
         </div>
 
-        {/* Top Bar */}
         <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/70 to-transparent p-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full">
@@ -487,7 +543,6 @@ const CallRoom: React.FC = () => {
           </div>
         </div>
 
-        {/* Small Floating Video */}
         <div className="absolute top-20 right-4 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700">
           <div id={isSwapped ? "remote-player" : "local-player"} className="w-full h-full">
             {!joined && !isSwapped && (
@@ -506,7 +561,6 @@ const CallRoom: React.FC = () => {
         </div>
       </div>
 
-      {/* Controls */}
       <div className="bg-gray-800 border-t border-gray-700 p-4 pb-6">
         <div className="flex justify-center items-center gap-3 sm:gap-4 max-w-md mx-auto">
           <button
