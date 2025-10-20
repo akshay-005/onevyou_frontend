@@ -15,10 +15,14 @@ const CallRoom: React.FC = () => {
   const socket = useSocket();
 
   const clientRef = useRef<IAgoraRTCClient | null>(null);
+  
   const localAudioRef = useRef<ILocalAudioTrack | null>(null);
   const localVideoRef = useRef<ILocalVideoTrack | null>(null);
   const joinInProgress = useRef(false);
   const isCleaningUp = useRef(false);
+  // prevent multiple event handlers being attached
+const callEndedHandlerInstalled = useRef(false);
+
   const wsHealthInterval = useRef<NodeJS.Timeout | null>(null);
   const tokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
   const subscriptionRef = useRef<Map<number, { audio?: boolean; video?: boolean }>>(new Map());
@@ -111,10 +115,7 @@ const CallRoom: React.FC = () => {
 
 
   useEffect(() => {
-    socket?.off("call:ended");
-
-
-
+   
 
     if (!channelName || joinInProgress.current || isCleaningUp.current) return;
 
@@ -466,15 +467,26 @@ timerRef.current = setInterval(() => {
       console.log("Call ended from server");
       endCall(true);
     };
-    socket?.on("call:ended", handleCallEnded);
+    
+    // ✅ Ensure we register the event only once per socket
+if (socket && !callEndedHandlerInstalled.current) {
+  socket.on("call:ended", handleCallEnded);
+  callEndedHandlerInstalled.current = true;
+}
+
 
    return () => {
-  socket?.off("call:ended", handleCallEnded);
+  if (socket && callEndedHandlerInstalled.current) {
+    socket.off("call:ended", handleCallEnded);
+    callEndedHandlerInstalled.current = false;
+  }
+
   if (timerRef.current) clearInterval(timerRef.current);
   if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
   if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
   // 🚫 Do NOT call endCall here — it kills the call mid-session
 };
+
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelName]);
@@ -528,7 +540,15 @@ timerRef.current = setInterval(() => {
       setRemoteUsers([]);
       subscriptionRef.current.clear();
 
-      socket?.emit("call:end", { channelName, durationSec });
+     // ✅ Compute exact elapsed time before clearing everything
+const elapsedSec = Math.floor((Date.now() - (startTime.current || Date.now())) / 1000);
+
+// update displayed duration
+setDurationSec(elapsedSec);
+
+// send accurate elapsed time to backend
+socket?.emit("call:end", { channelName, durationSec: elapsedSec });
+
 
       if (!silent) {
         toast({ title: "Call ended" });
