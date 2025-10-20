@@ -108,13 +108,31 @@ const CallRoom: React.FC = () => {
     }, 10000); // Every 10 seconds
   };
 
+
+
   useEffect(() => {
+    socket?.off("call:ended");
+
+
+
+
     if (!channelName || joinInProgress.current || isCleaningUp.current) return;
 
     const initCall = async () => {
       joinInProgress.current = true;
       await stopTracks();
       subscriptionRef.current.clear();
+
+      if (clientRef.current) {
+  try {
+    console.log("🧹 Cleaning old Agora client before new join");
+    await clientRef.current.leave();
+  } catch (e) {
+    console.warn("Old client leave error:", e);
+  }
+  clientRef.current.removeAllListeners();
+  clientRef.current = null;
+}
 
       const client = AgoraRTC.createClient({
         mode: "rtc",
@@ -133,6 +151,7 @@ const CallRoom: React.FC = () => {
         tokenRef.current = { token: tokenData.token, expiresAt: tokenData.expiresAt };
 
         // Join channel
+        await new Promise((r) => setTimeout(r, 300));
         await client.join(tokenData.appId, channelName, tokenData.token, tokenData.uid);
         console.log("✅ Joined channel");
 
