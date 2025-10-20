@@ -20,8 +20,8 @@ const CallRoom: React.FC = () => {
   const joinInProgress = useRef(false);
   const isCleaningUp = useRef(false);
   const wsHealthInterval = useRef<NodeJS.Timeout | null>(null);
-  const tokenRef = useRef<{ token: string; expireTime: number } | null>(null);
-  const subscribedUsers = useRef<Set<number>>(new Set());
+  const tokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
+  const subscriptionRef = useRef<Map<number, { audio?: boolean; video?: boolean }>>(new Map());
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -30,13 +30,11 @@ const CallRoom: React.FC = () => {
   const [joined, setJoined] = useState(false);
   const [networkQuality, setNetworkQuality] = useState<"good" | "poor" | "bad">("good");
   const [isSwapped, setIsSwapped] = useState(false);
-  const [callAccepted, setCallAccepted] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const callLimitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const startTime = useRef<number>(0);
-  const lastPingTime = useRef<number>(Date.now());
 
   const query = new URLSearchParams(window.location.search);
   const durationMin = Number(query.get("duration")) || 1;
@@ -58,28 +56,28 @@ const CallRoom: React.FC = () => {
     }
   };
 
-  // Refresh token before expiry (token is valid for 24 hours, refresh every 20 hours)
+  // Refresh token before expiry
   const refreshTokenIfNeeded = async () => {
     try {
       if (!tokenRef.current) return;
       const now = Date.now();
-      const timeUntilExpiry = tokenRef.current.expireTime - now;
+      const timeUntilExpiry = tokenRef.current.expiresAt - now;
 
-      // If less than 30 minutes left, refresh
-      if (timeUntilExpiry < 30 * 60 * 1000) {
-        console.log("Refreshing Agora token...");
+      // If less than 5 minutes left, refresh immediately
+      if (timeUntilExpiry < 5 * 60 * 1000) {
+        console.log("Token expiring soon, refreshing...");
         const res = await fetch(
-          `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
+          `${API_BASE}/api/agora/renew?channelName=${channelName}&durationMin=${durationMin}`,
+          { method: "POST" }
         );
         const data = await res.json();
         if (data.success) {
-          tokenRef.current = { token: data.token, expireTime: now + 24 * 60 * 60 * 1000 };
+          tokenRef.current = { token: data.token, expiresAt: data.expiresAt };
           const client = clientRef.current;
-          if (client) {
+          if (client && client.connectionState === "CONNECTED") {
             try {
-              // Renew token in SDK
               await client.renewToken(data.token);
-              console.log("Token refreshed successfully");
+              console.log("✅ Token renewed");
             } catch (err) {
               console.warn("Token renewal failed:", err);
             }
@@ -91,21 +89,13 @@ const CallRoom: React.FC = () => {
     }
   };
 
-  // WebSocket keep-alive with token refresh
+  // WebSocket keep-alive
   const startWebSocketHealth = () => {
     if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
 
     wsHealthInterval.current = setInterval(async () => {
       const client = clientRef.current;
       if (!client || client.connectionState !== "CONNECTED") return;
-
-      const now = Date.now();
-      const timeSinceLastPing = now - lastPingTime.current;
-
-      if (timeSinceLastPing > 45000) {
-        console.warn("WS appears stuck");
-        lastPingTime.current = now;
-      }
 
       try {
         // @ts-ignore
@@ -114,9 +104,8 @@ const CallRoom: React.FC = () => {
         console.warn("Health check failed:", e);
       }
 
-      lastPingTime.current = now;
       await refreshTokenIfNeeded();
-    }, 15000); // Every 15 seconds
+    }, 10000); // Every 10 seconds
   };
 
   useEffect(() => {
@@ -125,29 +114,27 @@ const CallRoom: React.FC = () => {
     const initCall = async () => {
       joinInProgress.current = true;
       await stopTracks();
+      subscriptionRef.current.clear();
 
       const client = AgoraRTC.createClient({
         mode: "rtc",
         codec: "h264",
       });
       clientRef.current = client;
-      subscribedUsers.current.clear();
 
       try {
-        // Fetch token WITH duration parameter
+        // Fetch token with duration
         const tokenRes = await fetch(
           `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
         );
         const tokenData = await tokenRes.json();
         if (!tokenData.success) throw new Error("Failed to get token");
 
-        // Store token with expiry time
-        const now = Date.now();
-        tokenRef.current = { token: tokenData.token, expireTime: now + 24 * 60 * 60 * 1000 };
+        tokenRef.current = { token: tokenData.token, expiresAt: tokenData.expiresAt };
 
         // Join channel
         await client.join(tokenData.appId, channelName, tokenData.token, tokenData.uid);
-        console.log("Joined channel successfully");
+        console.log("✅ Joined channel");
 
         // Network monitoring
         client.on("network-quality", (stats) => {
@@ -155,18 +142,9 @@ const CallRoom: React.FC = () => {
           if (worst <= 2) setNetworkQuality("good");
           else if (worst <= 4) setNetworkQuality("poor");
           else setNetworkQuality("bad");
-
-          // Auto-switch to low stream on poor network
-          if (worst > 3) {
-            remoteUsers.forEach(async (user) => {
-              try {
-                await client.setRemoteVideoStreamType(user.uid, 1);
-              } catch {}
-            });
-          }
         });
 
-        // Enable dual stream AFTER join
+        // Enable dual stream
         try {
           await client.enableDualStream();
           client.setLowStreamParameter({
@@ -241,42 +219,53 @@ const CallRoom: React.FC = () => {
         const tracks = [audio, video].filter(Boolean) as any[];
         if (tracks.length > 0) {
           await client.publish(tracks);
-          console.log("Published tracks");
+          console.log("✅ Published tracks");
         }
 
-        // Remote user handlers - CRITICAL: Wait for connection to be stable
+        // Remote user handlers - FIXED: Proper subscription tracking
         client.on("user-published", async (user, mediaType) => {
-          console.log(`User ${user.uid} published ${mediaType}`);
-
-          // Don't subscribe if already subscribed
-          if (subscribedUsers.current.has(user.uid) && mediaType === "video") {
-            console.log(`Already subscribed to ${user.uid}`);
-            return;
-          }
+          console.log(`📥 User ${user.uid} published ${mediaType}`);
 
           try {
-            // Wait a bit before subscribing to ensure connection is stable
-            await new Promise((r) => setTimeout(r, 500));
+            // Get subscription state for this user
+            const subState = subscriptionRef.current.get(user.uid) || {};
 
-            // Check connection state before subscribing
-            if (client.connectionState !== "CONNECTED") {
-              console.warn("Connection not ready for subscription");
+            // Skip if already subscribed to this media type
+            if (mediaType === "video" && subState.video) {
+              console.log(`Already subscribed to video from ${user.uid}`);
+              return;
+            }
+            if (mediaType === "audio" && subState.audio) {
+              console.log(`Already subscribed to audio from ${user.uid}`);
               return;
             }
 
-            await client.subscribe(user, mediaType);
-            subscribedUsers.current.add(user.uid);
+            // Wait for connection stability
+            await new Promise((r) => setTimeout(r, 300));
 
+            // Check connection
+            if (client.connectionState !== "CONNECTED") {
+              console.warn("Connection not ready");
+              return;
+            }
+
+            // Subscribe
+            await client.subscribe(user, mediaType);
+            console.log(`✅ Subscribed to ${mediaType} from ${user.uid}`);
+
+            // Track subscription
+            subState[mediaType === "video" ? "video" : "audio"] = true;
+            subscriptionRef.current.set(user.uid, subState);
+
+            // Handle video
             if (mediaType === "video") {
               try {
                 await client.setRemoteVideoStreamType(user.uid, 1);
               } catch {}
 
-              // Clean up old player
               const old = document.getElementById(`player-${user.uid}`);
               if (old) old.remove();
 
-              // Create new player
               const container = document.getElementById("remote-player");
               if (!container) return;
 
@@ -285,31 +274,24 @@ const CallRoom: React.FC = () => {
               div.className = "w-full h-full";
               container.appendChild(div);
 
-              // Play with delay
               setTimeout(() => {
                 try {
                   user.videoTrack?.play(`player-${user.uid}`);
-                  console.log(`Playing video from ${user.uid}`);
+                  console.log(`✅ Video playing from ${user.uid}`);
                 } catch (err) {
                   console.warn("Video play failed:", err);
-                  // Retry
-                  setTimeout(() => {
-                    try {
-                      user.videoTrack?.play(`player-${user.uid}`);
-                    } catch (e) {
-                      toast({
-                        title: "Video issue",
-                        description: "Remote video may not display",
-                        variant: "destructive",
-                      });
-                    }
-                  }, 1000);
                 }
-              }, 800);
+              }, 500);
             }
 
+            // Handle audio
             if (mediaType === "audio") {
-              user.audioTrack?.play();
+              try {
+                user.audioTrack?.play();
+                console.log(`✅ Audio playing from ${user.uid}`);
+              } catch (err) {
+                console.warn("Audio play failed:", err);
+              }
             }
 
             setRemoteUsers((prev) => {
@@ -318,33 +300,33 @@ const CallRoom: React.FC = () => {
             });
           } catch (err) {
             console.error("Subscribe error:", err);
-            subscribedUsers.current.delete(user.uid);
           }
         });
 
         client.on("user-unpublished", (user, mediaType) => {
+          console.log(`User ${user.uid} unpublished ${mediaType}`);
           if (mediaType === "video") {
             document.getElementById(`player-${user.uid}`)?.remove();
-            subscribedUsers.current.delete(user.uid);
+            const subState = subscriptionRef.current.get(user.uid) || {};
+            subState.video = false;
+            subscriptionRef.current.set(user.uid, subState);
           }
         });
 
         client.on("user-left", (user) => {
           console.log(`User ${user.uid} left`);
           document.getElementById(`player-${user.uid}`)?.remove();
-          subscribedUsers.current.delete(user.uid);
+          subscriptionRef.current.delete(user.uid);
           setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
         });
 
         client.on("exception", (event) => {
-          if (event.code === 1005) {
-            console.warn("Decode issue");
-          }
+          console.warn("Agora exception:", event.code);
         });
 
         // Connection state handler
         client.on("connection-state-change", (curState, prevState) => {
-          console.log(`Connection: ${prevState} -> ${curState}`);
+          console.log(`Connection: ${prevState} → ${curState}`);
 
           if (curState === "DISCONNECTED" && prevState !== "DISCONNECTING") {
             toast({
@@ -352,11 +334,7 @@ const CallRoom: React.FC = () => {
               description: "Call ended",
               variant: "destructive",
             });
-            setTimeout(() => endCall(false), 2000);
-          } else if (curState === "RECONNECTING") {
-            toast({ title: "Reconnecting..." });
-          } else if (curState === "CONNECTED" && prevState === "RECONNECTING") {
-            toast({ title: "Reconnected" });
+            endCall(false);
           }
         });
 
@@ -374,12 +352,11 @@ const CallRoom: React.FC = () => {
           setDurationSec(Math.floor((Date.now() - startTime.current) / 1000));
         }, 1000);
         setJoined(true);
-        setCallAccepted(true);
 
-        // Auto-end timer - CRITICAL: Only if duration is set
+        // Auto-end timer
         if (durationMin > 0) {
           callLimitTimeoutRef.current = setTimeout(() => {
-            toast({ title: "Time's up" });
+            console.log("⏰ Call duration ended");
             endCall(false);
           }, durationMin * 60 * 1000);
         }
@@ -398,11 +375,9 @@ const CallRoom: React.FC = () => {
 
     initCall();
 
-    const handleCallEnded = (payload: any) => {
-      if (payload.channelName === channelName) {
-        console.log("Received call:ended from server");
-        endCall(true);
-      }
+    const handleCallEnded = () => {
+      console.log("Call ended from server");
+      endCall(true);
     };
     socket?.on("call:ended", handleCallEnded);
 
@@ -420,9 +395,8 @@ const CallRoom: React.FC = () => {
     const audio = localAudioRef.current;
     if (!audio) return;
     try {
-      const newState = !isMicOn;
-      await audio.setEnabled(newState);
-      setIsMicOn(newState);
+      await audio.setEnabled(!isMicOn);
+      setIsMicOn(!isMicOn);
     } catch (err) {
       console.error("Mic toggle:", err);
     }
@@ -432,40 +406,15 @@ const CallRoom: React.FC = () => {
     const video = localVideoRef.current;
     if (!video) return;
     try {
-      const newState = !isCamOn;
-      await video.setEnabled(newState);
-      setIsCamOn(newState);
+      await video.setEnabled(!isCamOn);
+      setIsCamOn(!isCamOn);
     } catch (err) {
       console.error("Camera toggle:", err);
     }
   };
 
   const swapViews = () => {
-    const newSwapped = !isSwapped;
-    setIsSwapped(newSwapped);
-
-    setTimeout(() => {
-      if (localVideoRef.current) {
-        try {
-          localVideoRef.current.stop();
-          setTimeout(() => {
-            localVideoRef.current?.play(newSwapped ? "remote-player" : "local-player");
-          }, 100);
-        } catch {}
-      }
-
-      remoteUsers.forEach((user) => {
-        if (user.videoTrack) {
-          try {
-            user.videoTrack.stop();
-            setTimeout(() => {
-              const containerId = newSwapped ? "local-player" : `player-${user.uid}`;
-              user.videoTrack?.play(containerId);
-            }, 100);
-          } catch {}
-        }
-      });
-    }, 200);
+    setIsSwapped(!isSwapped);
   };
 
   const endCall = async (silent = false) => {
@@ -489,8 +438,7 @@ const CallRoom: React.FC = () => {
       await stopTracks();
       setJoined(false);
       setRemoteUsers([]);
-      setCallAccepted(false);
-      subscribedUsers.current.clear();
+      subscriptionRef.current.clear();
 
       socket?.emit("call:end", { channelName, durationSec });
 
@@ -506,9 +454,7 @@ const CallRoom: React.FC = () => {
   };
 
   const format = (sec: number) => {
-    const m = Math.floor(sec / 60)
-      .toString()
-      .padStart(2, "0");
+    const m = Math.floor(sec / 60).toString().padStart(2, "0");
     const s = (sec % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   };
@@ -522,10 +468,15 @@ const CallRoom: React.FC = () => {
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col relative overflow-hidden">
       <div className="flex-1 relative bg-black">
-        <div id={isSwapped ? "local-player" : "remote-player"} className="w-full h-full flex items-center justify-center">
+        <div
+          id={isSwapped ? "local-player" : "remote-player"}
+          className="w-full h-full flex items-center justify-center"
+        >
           {!isSwapped && remoteUsers.length === 0 && (
             <div className="text-center">
-              <div className="text-gray-400 text-lg mb-2 animate-pulse">Waiting for other person...</div>
+              <div className="text-gray-400 text-lg mb-2 animate-pulse">
+                Waiting for other person...
+              </div>
               <div className="text-gray-500 text-sm">{joined ? "Connected" : "Connecting..."}</div>
             </div>
           )}
@@ -537,7 +488,10 @@ const CallRoom: React.FC = () => {
               <Clock className="w-4 h-4" />
               <span className="text-sm font-medium">{format(durationSec)}</span>
             </div>
-            <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full" title={`Network: ${networkQuality}`}>
+            <div
+              className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full"
+              title={`Network: ${networkQuality}`}
+            >
               {getNetworkIcon()}
             </div>
           </div>
@@ -546,7 +500,9 @@ const CallRoom: React.FC = () => {
         <div className="absolute top-20 right-4 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700">
           <div id={isSwapped ? "remote-player" : "local-player"} className="w-full h-full">
             {!joined && !isSwapped && (
-              <div className="flex items-center justify-center h-full text-gray-500 text-xs">Connecting...</div>
+              <div className="flex items-center justify-center h-full text-gray-500 text-xs">
+                Connecting...
+              </div>
             )}
           </div>
 
@@ -557,7 +513,9 @@ const CallRoom: React.FC = () => {
             <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4" />
           </button>
 
-          <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">{isSwapped ? "Remote" : "You"}</div>
+          <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">
+            {isSwapped ? "Remote" : "You"}
+          </div>
         </div>
       </div>
 
@@ -569,7 +527,11 @@ const CallRoom: React.FC = () => {
               isMicOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
             }`}
           >
-            {isMicOn ? <Mic className="w-5 h-5 sm:w-6 sm:h-6" /> : <MicOff className="w-5 h-5 sm:w-6 sm:h-6" />}
+            {isMicOn ? (
+              <Mic className="w-5 h-5 sm:w-6 sm:h-6" />
+            ) : (
+              <MicOff className="w-5 h-5 sm:w-6 sm:h-6" />
+            )}
           </button>
 
           <button
@@ -578,10 +540,17 @@ const CallRoom: React.FC = () => {
               isCamOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
             }`}
           >
-            {isCamOn ? <Video className="w-5 h-5 sm:w-6 sm:h-6" /> : <VideoOff className="w-5 h-5 sm:w-6 sm:h-6" />}
+            {isCamOn ? (
+              <Video className="w-5 h-5 sm:w-6 sm:h-6" />
+            ) : (
+              <VideoOff className="w-5 h-5 sm:w-6 sm:h-6" />
+            )}
           </button>
 
-          <button onClick={() => endCall(false)} className="p-3 sm:p-4 rounded-full bg-red-600 hover:bg-red-700 transition-all active:scale-95">
+          <button
+            onClick={() => endCall(false)}
+            className="p-3 sm:p-4 rounded-full bg-red-600 hover:bg-red-700 transition-all active:scale-95"
+          >
             <PhoneOff className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
