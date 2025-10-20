@@ -136,6 +136,37 @@ const CallRoom: React.FC = () => {
         await client.join(tokenData.appId, channelName, tokenData.token, tokenData.uid);
         console.log("✅ Joined channel");
 
+        // ✅ Subscribe to existing users already in the channel
+// ✅ Resubscribe to all remote users (audio + video) already in the channel
+if (client.remoteUsers && client.remoteUsers.length > 0) {
+  console.log("📡 Found existing remote users:", client.remoteUsers.map(u => u.uid));
+  for (const user of client.remoteUsers) {
+    try {
+      await client.subscribe(user, "audio");
+      user.audioTrack?.play();
+      console.log(`✅ Subscribed to existing audio from ${user.uid}`);
+    } catch (err) {
+      console.warn("Auto-subscribe existing audio failed:", err);
+    }
+
+    try {
+      await client.subscribe(user, "video");
+      const container = document.getElementById("remote-player");
+      if (container) {
+        const div = document.createElement("div");
+        div.id = `player-${user.uid}`;
+        div.className = "w-full h-full";
+        container.appendChild(div);
+        user.videoTrack?.play(`player-${user.uid}`);
+      }
+      console.log(`✅ Subscribed to existing video from ${user.uid}`);
+    } catch (err) {
+      console.warn("Auto-subscribe existing video failed:", err);
+    }
+  }
+}
+
+
         // Network monitoring
         client.on("network-quality", (stats) => {
           const worst = Math.max(stats.uplinkNetworkQuality, stats.downlinkNetworkQuality);
@@ -348,17 +379,33 @@ const CallRoom: React.FC = () => {
 
         // Start timer
         startTime.current = Date.now();
-        timerRef.current = setInterval(() => {
-          setDurationSec(Math.floor((Date.now() - startTime.current) / 1000));
-        }, 1000);
+        if (timerRef.current) clearInterval(timerRef.current);
+timerRef.current = setInterval(() => {
+  const elapsed = Math.floor((Date.now() - startTime.current) / 1000);
+  setDurationSec(elapsed);
+
+  // ⏰ Safety cutoff
+  if (elapsed >= durationMin * 60) {
+    console.log("Auto-cutoff triggered from timer");
+    if (timerRef.current) clearInterval(timerRef.current);
+    endCall(false);
+  }
+}, 1000);
+
+
         setJoined(true);
 
         // Auto-end timer
         if (durationMin > 0) {
           callLimitTimeoutRef.current = setTimeout(() => {
-            console.log("⏰ Call duration ended");
-            endCall(false);
-          }, durationMin * 60 * 1000);
+  console.log("⏰ Call duration ended — auto-ending now");
+  if (timerRef.current) clearInterval(timerRef.current);
+  setDurationSec(durationMin * 60);
+  endCall(false);
+}, durationMin * 60 * 1000);
+
+
+
         }
       } catch (err: any) {
         console.error("Init error:", err);
@@ -381,13 +428,14 @@ const CallRoom: React.FC = () => {
     };
     socket?.on("call:ended", handleCallEnded);
 
-    return () => {
-      socket?.off("call:ended", handleCallEnded);
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
-      if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
-      endCall(true);
-    };
+   return () => {
+  socket?.off("call:ended", handleCallEnded);
+  if (timerRef.current) clearInterval(timerRef.current);
+  if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
+  if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
+  // 🚫 Do NOT call endCall here — it kills the call mid-session
+};
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelName]);
 
