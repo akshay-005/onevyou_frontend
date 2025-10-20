@@ -194,18 +194,39 @@ if (client.remoteUsers && client.remoteUsers.length > 0) {
           else setNetworkQuality("bad");
         });
 
-        // Enable dual stream
-        try {
-          await client.enableDualStream();
-          client.setLowStreamParameter({
-            width: 320,
-            height: 240,
-            framerate: 12,
-            bitrate: 150,
-          });
-        } catch (err) {
-          console.warn("Dual stream failed:", err);
-        }
+        // Enable dual stream + optimize quality
+try {
+  await client.enableDualStream();
+  await client.setLowStreamParameter({
+    width: 320,
+    height: 240,
+    framerate: 12,
+    bitrate: 200, // slightly higher for stability
+  });
+
+  // Force remote users to use high-quality stream (0)
+  client.on("user-published", async (user, mediaType) => {
+    if (mediaType === "video") {
+      try {
+        await client.setRemoteVideoStreamType(user.uid, 0); // 0 = high
+        console.log(`🎥 Forced high stream for ${user.uid}`);
+      } catch (err) {
+        console.warn("setRemoteVideoStreamType failed:", err);
+      }
+    }
+  });
+} catch (err) {
+  console.warn("Dual stream setup failed:", err);
+}
+
+
+client.on("user-joined", (user) => {
+  console.log("👋 Remote user joined:", user.uid);
+});
+client.on("user-left", (user) => {
+  console.log("🚪 Remote user left:", user.uid);
+});
+
 
         // Create tracks
         let audio: ILocalAudioTrack | null = null;
