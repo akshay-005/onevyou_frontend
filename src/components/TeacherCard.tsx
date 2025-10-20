@@ -1,42 +1,120 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Video, Star, IndianRupee, BookOpen, Instagram, Facebook, Youtube, Sparkles } from "lucide-react";
 
 interface TeacherCardProps {
   teacher: {
-    id: string;
-    name: string;
-    avatar: string;
-    expertise: string;
-    bio: string;
-    rating: number;
-    isOnline: boolean;
+    _id?: string;
+    id?: string;
+    name?: string;
+    fullName?: string;
+    profileImage?: string;
+    avatar?: string;
+    expertise?: string;
+    bio?: string;
+    profile?: {
+      bio?: string;
+      skills?: string[];
+      rating?: number;
+      pricingTiers?: { minutes: number; price: number }[];
+      socialMedia?: {
+        instagram?: string;
+        facebook?: string;
+        youtube?: string;
+      };
+    };
+    rating?: number;
+    isOnline?: boolean;
+    online?: boolean;
     socialMedia?: {
       instagram?: string;
       facebook?: string;
       youtube?: string;
     };
-    pricingTiers: {
+    pricingTiers?: {
       minutes: number;
       price: number;
     }[];
+    ratePerMinute?: number;
+    skill?: string;
+    about?: string;
   };
   onConnect: (teacherId: string) => void;
 }
 
 const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
-  // Get starting price (minimum price)
-  const startingPrice = Math.min(...teacher.pricingTiers.map(tier => tier.price));
+  // Extract data with fallbacks - handle multiple data structure formats
+  const teacherId = teacher._id || teacher.id || "";
+  const displayName = teacher.fullName || teacher.name || "User";
+  const profileImage = teacher.profileImage || teacher.avatar || "";
   
+  // Skills - check array first, then fallback
+  const skillsArray = Array.isArray(teacher.skills) ? teacher.skills : (teacher.profile?.skills || []);
+  const expertise = skillsArray.length > 0 ? skillsArray[0] : (teacher.expertise || teacher.skill || "Skill not specified");
+  
+  // Bio - try direct field first
+  const bio = teacher.bio || teacher.profile?.bio || teacher.about || "No description available";
+  
+  const rating = teacher.rating || teacher.profile?.rating || 4.8;
+  const isOnline = teacher.isOnline !== undefined ? teacher.isOnline : teacher.online || false;
+  
+  // Social media from either top-level or nested profile
+  const socialMedia = teacher.socialMedia || teacher.profile?.socialMedia || {};
+  
+  // Pricing tiers - ensure it's an array
+  const pricingTiers = Array.isArray(teacher.pricingTiers)
+    ? teacher.pricingTiers
+    : teacher.profile?.pricingTiers || [
+        { minutes: 1, price: teacher.ratePerMinute || 39 }
+      ];
+
+  // Get starting price (minimum price)
+  const startingPrice = Math.min(...pricingTiers.map(tier => tier.price || 0));
+  
+  // Get initials for avatar fallback
+  const initials = displayName
+    .split(' ')
+    .map(n => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+
+  // Helper to build proper social URLs and fix common typos
+  const buildSocialUrl = (username: string, platform: string) => {
+    if (!username) return "";
+    
+    // If it's already a full URL, fix typos and return
+    if (username.startsWith("http")) {
+      let url = username;
+      // Fix common typos
+      url = url.replace("intagram.com", "instagram.com"); // typo fix
+      url = url.replace("youtube.com/@", "youtube.com/@"); // ensure correct format
+      return url;
+    }
+    
+    // Build URL from username
+    const cleaned = username.replace("@", "").trim();
+    
+    const baseUrls: { [key: string]: string } = {
+      instagram: `https://instagram.com/${cleaned}`,
+      facebook: `https://facebook.com/${cleaned}`,
+      youtube: `https://youtube.com/@${cleaned}`,
+    };
+    
+    return baseUrls[platform] || "";
+  };
+
+  console.log("TeacherCard Debug:", { name: displayName, bio, skills: skillsArray, hasProfileImage: !!profileImage });
+
   return (
     <Card className="group relative overflow-hidden transition-all duration-500 hover:shadow-xl hover:-translate-y-2 bg-card border-border/40 backdrop-blur-sm">
       {/* Subtle gradient overlay */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
       
-      {/* Online Indicator - More elegant */}
-      {teacher.isOnline && (
+      {/* Online Indicator */}
+      {isOnline && (
         <div className="absolute top-3 right-3 z-10">
           <div className="flex items-center gap-1.5 bg-white/90 backdrop-blur-sm rounded-full px-2 py-1 shadow-sm">
             <div className="relative">
@@ -51,70 +129,82 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
       <CardContent className="p-5 space-y-4 relative">
         {/* Header with Avatar and Name */}
         <div className="flex items-start gap-3">
-          <Avatar className="h-12 w-12 ring-2 ring-primary/10 group-hover:ring-primary/20 transition-all">
+          <Avatar className="h-12 w-12 ring-2 ring-primary/10 group-hover:ring-primary/20 transition-all flex-shrink-0">
+            {profileImage && (
+              <AvatarImage 
+                src={profileImage} 
+                alt={displayName}
+                className="object-cover"
+              />
+            )}
             <AvatarFallback className="bg-gradient-primary text-primary-foreground text-sm font-medium">
-              {teacher.name.split(' ').map(n => n[0]).join('')}
+              {initials}
             </AvatarFallback>
           </Avatar>
-          <div className="flex-1">
-            <h3 className="font-semibold text-base text-foreground leading-tight">{teacher.name}</h3>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-base text-foreground leading-tight truncate">
+              {displayName}
+            </h3>
             <Badge variant="secondary" className="mt-1.5 text-xs font-normal">
               <BookOpen className="h-3 w-3 mr-1" />
-              {teacher.expertise}
+              <span className="truncate">{expertise}</span>
             </Badge>
           </div>
         </div>
 
         {/* Bio */}
         <p className="text-muted-foreground text-sm leading-relaxed line-clamp-2">
-          {teacher.bio}
+          {bio}
         </p>
 
-        {/* Social Media - More subtle */}
-        {teacher.socialMedia && (
+        {/* Social Media Icons */}
+        {(socialMedia.instagram || socialMedia.facebook || socialMedia.youtube) && (
           <div className="flex gap-1">
-            {teacher.socialMedia.instagram && (
+            {socialMedia.instagram && (
               <a 
-                href={`https://instagram.com/${teacher.socialMedia.instagram.replace('@', '')}`}
+                href={buildSocialUrl(socialMedia.instagram, "instagram")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1.5 rounded-md hover:bg-secondary transition-colors"
                 onClick={(e) => e.stopPropagation()}
+                title="Instagram"
               >
-                <Instagram className="h-3.5 w-3.5 text-muted-foreground" />
+                <Instagram className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors" />
               </a>
             )}
-            {teacher.socialMedia.facebook && (
+            {socialMedia.facebook && (
               <a 
-                href={`https://facebook.com/${teacher.socialMedia.facebook}`}
+                href={buildSocialUrl(socialMedia.facebook, "facebook")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1.5 rounded-md hover:bg-secondary transition-colors"
                 onClick={(e) => e.stopPropagation()}
+                title="Facebook"
               >
-                <Facebook className="h-3.5 w-3.5 text-muted-foreground" />
+                <Facebook className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors" />
               </a>
             )}
-            {teacher.socialMedia.youtube && (
+            {socialMedia.youtube && (
               <a 
-                href={`https://youtube.com/@${teacher.socialMedia.youtube.replace('@', '')}`}
+                href={buildSocialUrl(socialMedia.youtube, "youtube")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1.5 rounded-md hover:bg-secondary transition-colors"
                 onClick={(e) => e.stopPropagation()}
+                title="YouTube"
               >
-                <Youtube className="h-3.5 w-3.5 text-muted-foreground" />
+                <Youtube className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors" />
               </a>
             )}
           </div>
         )}
 
-        {/* Stats - More elegant */}
+        {/* Stats - Rating & Price */}
         <div className="flex gap-3 py-3 border-y border-border/50">
           <div className="flex-1 text-center">
             <div className="flex items-center justify-center gap-1 text-primary">
               <Star className="h-3.5 w-3.5 fill-current" />
-              <span className="font-semibold text-sm">{teacher.rating}</span>
+              <span className="font-semibold text-sm">{rating.toFixed(1)}</span>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">Rating</p>
           </div>
@@ -128,10 +218,10 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
           </div>
         </div>
 
-        {/* Connect Button - More attractive */}
+        {/* Connect Button */}
         <Button 
           className="w-full bg-gradient-primary hover:opacity-90 transition-all duration-300 text-sm font-medium py-2.5 group/btn"
-          onClick={() => onConnect(teacher.id)}
+          onClick={() => onConnect(teacherId)}
           size="sm"
         >
           <Video className="mr-2 h-3.5 w-3.5 group-hover/btn:animate-pulse" />

@@ -1,10 +1,10 @@
 // frontend/src/pages/UnifiedDashboard.tsx
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Avatar,
   AvatarImage,
-  AvatarFallback,
+  AvatarFallback, 
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,10 @@ const UnifiedDashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [onlineCount, setOnlineCount] = useState(0);
 
+  // ✅ NEW: Ref to track if user manually toggled (prevents auto-sync from overriding manual toggle)
+  const userManuallyToggled = useRef(false);
+  const initialLoadComplete = useRef(false);
+
   // Dialogs
   const [showHistory, setShowHistory] = useState(false);
   const [showEarnings, setShowEarnings] = useState(false);
@@ -91,7 +95,7 @@ const UnifiedDashboard: React.FC = () => {
   const [selectedTeacher, setSelectedTeacher] = useState<any | null>(null);
   const [showPricingModal, setShowPricingModal] = useState(false);
 
-  // Pricing Settings (dummy local version)
+  // Pricing Settings
   const [customDurations, setCustomDurations] = useState([
     { id: 1, minutes: 1, price: 39, isBase: true },
     { id: 2, minutes: 5, price: 199, isBase: false },
@@ -99,158 +103,217 @@ const UnifiedDashboard: React.FC = () => {
   ]);
   const [newDuration, setNewDuration] = useState({ minutes: "", price: "" });
 
-  // Load current user
-  useEffect(() => {
-    let mounted = true;
-    api
-      .getMe()
-      .then((res) => {
-        if (!mounted) return;
-        if (res?.success) setCurrentUser(res.user);
-      })
-      .catch((err) => {
-        console.error("getMe error:", err);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  // KEY SECTIONS TO REPLACE IN UnifiedDashboard.tsx
 
-  // Fetch online users
-  const fetchOnlineUsers = async () => {
-    try {
-      const json = await api.getOnlineUsers();
-      if (json?.success) {
-        const all = json.users || [];
-        const myId = currentUser?._id || localStorage.getItem("userId");
-        const others = all.filter((u: any) => u._id !== myId);
-        setUsers(others);
-        setOnlineCount(others.length);
+// ✅ FIXED: Load current user - only set toggle state once on initial load
+useEffect(() => {
+  let mounted = true;
+  api
+    .getMe()
+    .then((res) => {
+      if (!mounted) return;
+      if (res?.success) {
+        setCurrentUser(res.user);
+        // ✅ Only set toggle if not manually toggled and first time loading
+        if (!userManuallyToggled.current && !initialLoadComplete.current) {
+          console.log("Initial load: setting isOnline to", res.user.online);
+          setIsOnline(res.user.online || false);
+          initialLoadComplete.current = true;
+        }
       }
-    } catch (err) {
-      console.error("❌ Fetch users error:", err);
-    }
+    })
+    .catch((err) => {
+      console.error("getMe error:", err);
+      initialLoadComplete.current = true;
+    });
+  return () => {
+    mounted = false;
   };
+}, []);
 
-  // Socket event handling
-  useEffect(() => {
-    if (!socket) return;
+// Fetch online users
+const fetchOnlineUsers = async () => {
+  try {
+    const json = await api.getOnlineUsers();
+    if (json?.success) {
+      const all = json.users || [];
+      const myId = currentUser?._id || localStorage.getItem("userId");
+      const others = all.filter((u: any) => u._id !== myId);
+      setUsers(others);
+      setOnlineCount(others.length);
+      console.log("Fetched online users:", others.length);
+    }
+  } catch (err) {
+    console.error("Fetch users error:", err);
+  }
+};
 
-    const onConnect = () => {
-      console.log("✅ Socket connected:", socket.id);
-      fetchOnlineUsers();
-    };
+// ✅ FIXED: Socket event handling - removed problematic dependency array
+useEffect(() => {
+  if (!socket) {
+    console.log("Socket not ready");
+    return;
+  }
 
-    const onUserStatus = () => fetchOnlineUsers();
+  console.log("Setting up socket listeners");
 
-    const onIncoming = (payload: any) => {
-      setIncomingCall(payload);
-      setShowIncoming(true);
-      toast({
-        title: "📞 Incoming Call",
-        description: `${payload.callerName || "Someone"} is calling you.`,
-      });
-    };
-
-    const onCallResponse = (payload: any) => {
-      if (payload.accepted && payload.channelName) {
-        navigate(`/call/${payload.channelName}`);
-      } else {
-        toast({
-          title: "Call Rejected",
-          description: "The other user declined the call.",
-          variant: "destructive",
-        });
-      }
-    };
-
-    socket.on("connect", onConnect);
-    socket.on("user:status", onUserStatus);
-    socket.on("call:incoming", onIncoming);
-    socket.on("call:response", onCallResponse);
-
+  const onConnect = () => {
+    console.log("Socket connected:", socket.id);
+    // ✅ ALWAYS fetch users when socket connects (don't check initialLoadComplete)
     fetchOnlineUsers();
+  };
 
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off("user:status", onUserStatus);
-      socket.off("call:incoming", onIncoming);
-      socket.off("call:response", onCallResponse);
-    };
-  }, [socket, currentUser]);
+  const onUserStatus = (update: any) => {
+    const myUserId = currentUser?._id || localStorage.getItem("userId");
+    console.log("user:status event", update, "myUserId:", myUserId);
 
-  // Payment complete → emit call request
-  const onPaymentComplete = (payload: {
-    teacherId: string;
-    minutes: number;
-    price: number;
-  }) => {
-    const channelName = `call-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 8)}`;
-    const toUserId = payload.teacherId;
-    const price = payload.price;
-
-    if (!socket) {
-      toast({ title: "Socket not connected", variant: "destructive" });
+    // ✅ If this is OUR status update and we manually toggled, don't override local state
+    if (update.userId === myUserId && userManuallyToggled.current) {
+      console.log("Ignoring our own status broadcast (manual toggle in progress)");
       return;
     }
 
+    setUsers((prev) => {
+      const updated = prev.map((u) =>
+        u._id === update.userId ? { ...u, online: update.isOnline } : u
+      );
+      const onlineUsers = updated.filter((u) => u.online);
+      setOnlineCount(onlineUsers.length);
+      return updated;
+    });
+  };
+
+  const onIncoming = (payload: any) => {
+    setIncomingCall(payload);
+    setShowIncoming(true);
     toast({
-      title: "Payment successful 💰",
-      description: "Starting your video call...",
+      title: "Incoming Call",
+      description: `${payload.callerName || "Someone"} is calling you.`,
     });
-
-    socket.emit("call:request", { toUserId, channelName, price });
-
-    setShowPricingModal(false);
-    setSelectedTeacher(null);
   };
 
-  const openPricingForTeacher = (teacher: any) => {
-    const safeTeacher = {
-      ...teacher,
-      pricingTiers: Array.isArray(teacher?.pricingTiers)
-        ? teacher.pricingTiers
-        : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }],
-    };
-    setSelectedTeacher(safeTeacher);
-    setShowPricingModal(true);
-  };
-
-  const handleConnect = (userId: string, rate: number, userObj?: any) => {
-    const teacherLike =
-      userObj || {
-        id: userId,
-        name: "User",
-        pricingTiers: [{ minutes: 1, price: rate || 39 }],
-      };
-    openPricingForTeacher(teacherLike);
-  };
-
-  const handleOnlineToggle = (checked: boolean) => {
-    setIsOnline(checked);
-    if (!socket) {
-      toast({ title: "Socket not connected" });
-      return;
-    }
-
-    socket.emit("creator-status", {
-      creatorId: currentUser?._id,
-      isOnline: checked,
-    });
-
-    if (checked) {
-      const link = `${window.location.origin}/connect/${Math.random()
-        .toString(36)
-        .substring(7)}`;
-      setShareLink(link);
-      setShowShareDialog(true);
-      toast({ title: "✅ You're now online" });
+  const onCallResponse = (payload: any) => {
+    if (payload.accepted && payload.channelName) {
+      navigate(`/call/${payload.channelName}`);
     } else {
-      toast({ title: "🔕 You're offline" });
+      toast({
+        title: "Call Rejected",
+        description: "The other user declined the call.",
+        variant: "destructive",
+      });
     }
   };
+
+  // Register all listeners
+  socket.on("connect", onConnect);
+  socket.on("user:status", onUserStatus);
+  socket.on("call:incoming", onIncoming);
+  socket.on("call:response", onCallResponse);
+
+  // If already connected, call onConnect immediately
+  if (socket.connected) {
+    console.log("Socket already connected, calling onConnect");
+    onConnect();
+  }
+
+  // Cleanup
+  return () => {
+    console.log("Cleaning up socket listeners");
+    socket.off("connect", onConnect);
+    socket.off("user:status", onUserStatus);
+    socket.off("call:incoming", onIncoming);
+    socket.off("call:response", onCallResponse);
+  };
+}, [socket]); // ✅ ONLY depend on socket object itself, not socket.connected
+
+// ✅ FIXED: Toggle with immediate socket emit
+const handleOnlineToggle = (checked: boolean) => {
+  if (!socket) {
+    toast({ title: "Socket not connected", variant: "destructive" });
+    setIsOnline(false);
+    return;
+  }
+
+  // ✅ Mark that user manually toggled
+  userManuallyToggled.current = true;
+  console.log("User toggled:", checked);
+
+  // ✅ Update local state immediately
+  setIsOnline(checked);
+
+  // ✅ Emit to server immediately
+  socket.emit("user:status:update", {
+    userId: currentUser?._id,
+    isOnline: checked,
+  });
+
+  if (checked) {
+    toast({ title: "You're now Online" });
+    // ✅ Fetch fresh online users after going online
+    setTimeout(() => fetchOnlineUsers(), 200);
+  } else {
+    toast({ title: "You're now Offline" });
+    // ✅ Clear users list when offline
+    setUsers([]);
+  }
+
+  // ✅ Reset the ref after a short delay to allow state sync
+  setTimeout(() => {
+    userManuallyToggled.current = false;
+    console.log("Manual toggle complete, sync re-enabled");
+  }, 1000);
+};
+
+// Add these functions to UnifiedDashboard.tsx right after handleOnlineToggle
+
+// ✅ Payment complete → emit call request
+const onPaymentComplete = (payload: {
+  teacherId: string;
+  minutes: number;
+  price: number;
+}) => {
+  const channelName = `call-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+  const toUserId = payload.teacherId;
+  const price = payload.price;
+
+  if (!socket) {
+    toast({ title: "Socket not connected", variant: "destructive" });
+    return;
+  }
+
+  toast({
+    title: "Payment successful",
+    description: "Starting your video call...",
+  });
+
+  socket.emit("call:request", { toUserId, channelName, price });
+
+  setShowPricingModal(false);
+  setSelectedTeacher(null);
+};
+
+const openPricingForTeacher = (teacher: any) => {
+  const safeTeacher = {
+    ...teacher,
+    pricingTiers: Array.isArray(teacher?.pricingTiers)
+      ? teacher.pricingTiers
+      : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }],
+  };
+  setSelectedTeacher(safeTeacher);
+  setShowPricingModal(true);
+};
+
+const handleConnect = (userId: string, rate: number, userObj?: any) => {
+  const teacherLike =
+    userObj || {
+      id: userId,
+      name: "User",
+      pricingTiers: [{ minutes: 1, price: rate || 39 }],
+    };
+  openPricingForTeacher(teacherLike);
+};
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text || "");
@@ -278,32 +341,57 @@ const UnifiedDashboard: React.FC = () => {
 
   // Filter & sort
   const filteredUsers = useMemo(() => {
-    let list = users.filter((u) => {
-      const name = u.fullName || u.profile?.name || u.phoneNumber || "User";
-      return name.toLowerCase().includes(searchTerm.toLowerCase());
+  let list = users.filter((u) => {
+    // Search by name, bio, AND skills
+    const name = u.fullName || u.profile?.name || u.phoneNumber || "User";
+    const bio = u.bio || u.profile?.bio || u.about || "";
+    const skillsText = Array.isArray(u.skills) 
+      ? u.skills.join(" ").toLowerCase() 
+      : (u.profile?.skills || []).join(" ").toLowerCase();
+    
+    const searchLower = searchTerm.toLowerCase();
+    
+    // Match if search term found in name, bio, or skills
+    return (
+      name.toLowerCase().includes(searchLower) ||
+      bio.toLowerCase().includes(searchLower) ||
+      skillsText.includes(searchLower)
+    );
+  });
+
+  // Filter by category/expertise
+  if (filterBy !== "all") {
+    list = list.filter((u) => {
+      const skills = Array.isArray(u.skills) ? u.skills : (u.profile?.skills || []);
+      const skillsText = skills.join(" ").toLowerCase();
+      return skillsText.includes(filterBy.toLowerCase());
     });
+  }
 
-    if (filterBy !== "all") {
-      list = list.filter((u) =>
-        (u.profile?.expertise || "")
-          .toLowerCase()
-          .includes(filterBy.toLowerCase())
-      );
-    }
+  // Sorting
+  if (sortBy === "rate-high") {
+    list.sort((a, b) => (b.ratePerMinute || 0) - (a.ratePerMinute || 0));
+  } else if (sortBy === "rate-low") {
+    list.sort((a, b) => (a.ratePerMinute || 0) - (b.ratePerMinute || 0));
+  } else if (sortBy === "skill") {
+    // Sort by first skill alphabetically
+    list.sort((a, b) => {
+      const skillA = Array.isArray(a.skills) ? a.skills[0] : "";
+      const skillB = Array.isArray(b.skills) ? b.skills[0] : "";
+      return (skillA || "").localeCompare(skillB || "");
+    });
+  } else {
+    // Default: sort by name
+    list.sort((a, b) => (a.fullName || "").localeCompare(b.fullName || ""));
+  }
 
-    if (sortBy === "rate-high")
-      list.sort((a, b) => (b.ratePerMinute || 0) - (a.ratePerMinute || 0));
-    else if (sortBy === "rate-low")
-      list.sort((a, b) => (a.ratePerMinute || 0) - (b.ratePerMinute || 0));
-    else list.sort((a, b) => (a.fullName || "").localeCompare(b.fullName || ""));
-
-    return list;
-  }, [users, searchTerm, sortBy, filterBy]);
+  console.log("Filtered users:", list.length, "Sort:", sortBy, "Filter:", filterBy);
+  return list;
+}, [users, searchTerm, sortBy, filterBy]);
 
   // --- UI ---
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/30 to-background relative">
-      {/* Subtle pattern */}
       <div
         className="fixed inset-0 opacity-[0.015] pointer-events-none"
         style={{
@@ -386,16 +474,14 @@ const UnifiedDashboard: React.FC = () => {
                 </DropdownMenuItem>
 
                 <DropdownMenuItem onClick={() => setShowPricingSettings(true)}>
-                  <IndianRupee className="mr-2 h-4 w-4" /> Pricing Settings
+                  <IndianRupee className="mr-2 h-4 w-4" /> Set Pricing 
                 </DropdownMenuItem>
 
                 <DropdownMenuItem
-  onClick={() => navigate("/profile-setup?edit=true")}
->
-  <Settings className="mr-2 h-4 w-4" /> Edit Profile
-</DropdownMenuItem>
-
-
+                  onClick={() => navigate("/profile-setup?edit=true")}
+                >
+                  <Settings className="mr-2 h-4 w-4" /> Edit Profile
+                </DropdownMenuItem>
 
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -429,6 +515,10 @@ const UnifiedDashboard: React.FC = () => {
 
                 <DropdownMenuItem
                   onClick={() => {
+                    if (socket) {
+                      console.log("Disconnecting socket on logout...");
+                      socket.disconnect();
+                    }
                     localStorage.clear();
                     navigate("/");
                   }}
@@ -488,29 +578,44 @@ const UnifiedDashboard: React.FC = () => {
             Available Users ({onlineCount})
           </h3>
           <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {filteredUsers.map((u, i) => (
-  <TeacherCard
-    key={i}
-    teacher={{
-      name: u.fullName || u.profile?.name || u.phoneNumber || "User",
-      expertise:
-        u.profile?.expertise ||
-        u.profile?.bio ||
-        u.skill ||
-        u.about ||
-        "Skill not specified",
-      rating: u.profile?.rating || 4.8,
-      isOnline: u.online,
-      pricingTiers: [
-        { minutes: 1, price: u.ratePerMinute || 39 },
-        ...(u.profile?.pricingTiers || []),
-      ],
-    }}
-    onConnect={() =>
-      handleConnect(u._id, u.ratePerMinute || 39, u)
-    }
-  />
-))}
+            {filteredUsers.map((u, i) => {
+  console.log("🎨 Rendering card for user:", {
+    name: u.fullName,
+    bio: u.bio,
+    skills: u.skills,
+    hasImage: !!u.profileImage,
+  });
+
+  return (
+    <TeacherCard
+      key={u._id || i}
+      teacher={{
+        _id: u._id,
+        id: u._id, // Both _id and id for compatibility
+        fullName: u.fullName,
+        name: u.fullName || u.profile?.name || u.phoneNumber || "User",
+        profileImage: u.profileImage, // Direct from API
+        bio: u.bio, // Direct from API
+        skills: u.skills, // Direct from API (array)
+        expertise: u.skills?.[0] || "Skill not specified", // First skill
+        rating: u.profile?.rating || 4.8,
+        isOnline: u.online,
+        online: u.online,
+        socialMedia: u.socialMedia, // Direct from API
+        pricingTiers: Array.isArray(u.pricingTiers)
+          ? u.pricingTiers
+          : [
+              { minutes: 1, price: u.ratePerMinute || 39 },
+              ...(u.profile?.pricingTiers || []),
+            ],
+        ratePerMinute: u.ratePerMinute || 39,
+      }}
+      onConnect={() =>
+        handleConnect(u._id, u.ratePerMinute || 39, u)
+      }
+    />
+  );
+})}
 
             {filteredUsers.length === 0 && (
               <div className="text-muted-foreground">
@@ -568,7 +673,6 @@ const UnifiedDashboard: React.FC = () => {
         />
       )}
 
-      {/* ✅ New Enhanced Pricing Settings */}
       <Dialog open={showPricingSettings} onOpenChange={setShowPricingSettings}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -597,7 +701,6 @@ const UnifiedDashboard: React.FC = () => {
                 </div>
               ))}
 
-            {/* Custom durations */}
             {customDurations
               .filter((d) => !d.isBase)
               .map((d) => (
@@ -638,7 +741,6 @@ const UnifiedDashboard: React.FC = () => {
                 </div>
               ))}
 
-            {/* Add new */}
             <div className="flex items-center gap-2">
               <Input
                 placeholder="Minutes"
@@ -686,7 +788,6 @@ const UnifiedDashboard: React.FC = () => {
               </Button>
             </div>
 
-            {/* Quick add */}
             <div className="flex flex-wrap gap-2">
               {[5, 10, 15, 20, 30, 60].map((min) => (
                 <Button
