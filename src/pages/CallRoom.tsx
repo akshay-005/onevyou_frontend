@@ -226,7 +226,14 @@ const CallRoom: React.FC = () => {
         localVideoRef.current = video;
 
         if (video) {
-          video.play("local-player").catch(e => console.warn("Local play failed:", e));
+          try {
+            const playPromise = video.play("local-player");
+            if (playPromise && playPromise.catch) {
+              playPromise.catch(e => console.warn("Local play failed:", e));
+            }
+          } catch (e) {
+            console.warn("Local play failed:", e);
+          }
         }
 
         const tracks = [audio, video].filter(Boolean) as any[];
