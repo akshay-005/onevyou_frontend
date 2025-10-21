@@ -138,18 +138,32 @@ const CallRoom: React.FC = () => {
             try {
               if (user.hasAudio) {
                 await client.subscribe(user, "audio");
-                user.audioTrack?.play();
+                if (user.audioTrack) {
+                  const audioPlayPromise = user.audioTrack.play();
+                  if (audioPlayPromise && typeof audioPlayPromise.catch === 'function') {
+                    audioPlayPromise.catch(e => console.warn("Auto-play audio failed:", e));
+                  }
+                }
                 console.log(`✅ Subscribed to existing audio from ${user.uid}`);
               }
               if (user.hasVideo) {
                 await client.subscribe(user, "video");
                 const container = document.getElementById("remote-player");
-                if (container) {
+                if (container && user.videoTrack) {
                   const div = document.createElement("div");
                   div.id = `player-${user.uid}`;
                   div.className = "w-full h-full";
                   container.appendChild(div);
-                  setTimeout(() => user.videoTrack?.play(`player-${user.uid}`), 300);
+                  setTimeout(() => {
+                    try {
+                      const videoPlayPromise = user.videoTrack.play(`player-${user.uid}`);
+                      if (videoPlayPromise && typeof videoPlayPromise.catch === 'function') {
+                        videoPlayPromise.catch(e => console.warn("Auto-play video failed:", e));
+                      }
+                    } catch (e) {
+                      console.warn("Auto-play video failed:", e);
+                    }
+                  }, 300);
                 }
                 console.log(`✅ Subscribed to existing video from ${user.uid}`);
               }
@@ -228,7 +242,7 @@ const CallRoom: React.FC = () => {
         if (video) {
           try {
             const playPromise = video.play("local-player");
-            if (playPromise && playPromise.catch) {
+            if (playPromise && typeof playPromise.catch === 'function') {
               playPromise.catch(e => console.warn("Local play failed:", e));
             }
           } catch (e) {
@@ -280,12 +294,30 @@ const CallRoom: React.FC = () => {
               container.appendChild(div);
 
               setTimeout(() => {
-                user.videoTrack?.play(`player-${user.uid}`).catch(e => console.warn("Video play failed:", e));
+                try {
+                  if (user.videoTrack) {
+                    const playPromise = user.videoTrack.play(`player-${user.uid}`);
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                      playPromise.catch(e => console.warn("Video play failed:", e));
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Video play failed:", e);
+                }
               }, 500);
             }
 
             if (mediaType === "audio") {
-              user.audioTrack?.play().catch(e => console.warn("Audio play failed:", e));
+              try {
+                if (user.audioTrack) {
+                  const playPromise = user.audioTrack.play();
+                  if (playPromise && typeof playPromise.catch === 'function') {
+                    playPromise.catch(e => console.warn("Audio play failed:", e));
+                  }
+                }
+              } catch (e) {
+                console.warn("Audio play failed:", e);
+              }
             }
 
             if (componentMounted.current) {
