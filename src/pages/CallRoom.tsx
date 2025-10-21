@@ -1,12 +1,14 @@
-// frontend/src/pages/CallRoom.tsx - PERMANENT FIX
+// frontend/src/pages/CallRoom.tsx
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AgoraRTC, { IAgoraRTCClient, ILocalVideoTrack, ILocalAudioTrack } from "agora-rtc-sdk-ng";
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi } from "lucide-react";
 import { useSocket } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
 
-AgoraRTC.setLogLevel(3);
+// Set Agora log level to reduce noise
+AgoraRTC.setLogLevel(1); // 0=debug, 1=info, 2=warning, 3=error, 4=none
 
 const CallRoom: React.FC = () => {
   const { channelName } = useParams();
@@ -19,10 +21,6 @@ const CallRoom: React.FC = () => {
   const localVideoRef = useRef<ILocalVideoTrack | null>(null);
   const joinInProgress = useRef(false);
   const isCleaningUp = useRef(false);
-  const componentMounted = useRef(true); // Track if component is still mounted
-  const wsHealthInterval = useRef<NodeJS.Timeout | null>(null);
-  const tokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
-  const subscriptionRef = useRef<Map<number, { audio?: boolean; video?: boolean }>>(new Map());
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -30,7 +28,6 @@ const CallRoom: React.FC = () => {
   const [durationSec, setDurationSec] = useState(0);
   const [joined, setJoined] = useState(false);
   const [networkQuality, setNetworkQuality] = useState<"good" | "poor" | "bad">("good");
-  const [isSwapped, setIsSwapped] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -53,352 +50,229 @@ const CallRoom: React.FC = () => {
         localVideoRef.current = null;
       }
     } catch (err) {
-      console.warn("Track cleanup:", err);
+      console.warn("Track cleanup error:", err);
     }
-  };
-
-  const refreshTokenIfNeeded = async () => {
-    try {
-      if (!tokenRef.current || !componentMounted.current) return;
-      const now = Date.now();
-      const timeUntilExpiry = tokenRef.current.expiresAt - now;
-
-      if (timeUntilExpiry < 5 * 60 * 1000) {
-        console.log("Refreshing token...");
-        const res = await fetch(
-          `${API_BASE}/api/agora/renew?channelName=${channelName}&durationMin=${durationMin}`,
-          { method: "POST" }
-        );
-        const data = await res.json();
-        if (data.success && componentMounted.current) {
-          tokenRef.current = { token: data.token, expiresAt: data.expiresAt };
-          const client = clientRef.current;
-          if (client && client.connectionState === "CONNECTED") {
-            await client.renewToken(data.token);
-            console.log("✅ Token renewed");
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Token refresh error:", err);
-    }
-  };
-
-  const startWebSocketHealth = () => {
-    if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
-
-    wsHealthInterval.current = setInterval(async () => {
-      if (!componentMounted.current) return;
-      const client = clientRef.current;
-      if (!client || client.connectionState !== "CONNECTED") return;
-
-      try {
-        // @ts-ignore
-        client.getRTCStats?.();
-      } catch (e) {
-        console.warn("Health check failed:", e);
-      }
-
-      await refreshTokenIfNeeded();
-    }, 10000);
   };
 
   useEffect(() => {
-    componentMounted.current = true;
-
     if (!channelName || joinInProgress.current || isCleaningUp.current) return;
 
     const initCall = async () => {
       joinInProgress.current = true;
       await stopTracks();
-      subscriptionRef.current.clear();
 
-      const client = AgoraRTC.createClient({
-        mode: "rtc",
-        codec: "h264",
+      const client = AgoraRTC.createClient({ 
+        mode: "rtc", 
+        codec: "vp8" // VP8 is more stable than H264 on most devices
       });
       clientRef.current = client;
 
       try {
-        const tokenRes = await fetch(
-          `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
-        );
-        const tokenData = await tokenRes.json();
-        if (!tokenData.success) throw new Error("Failed to get token");
+        // Fetch token
+        const res = await fetch(`${API_BASE}/api/agora/token?channelName=${channelName}`);
+        const data = await res.json();
+        if (!data.success) throw new Error("Failed to get Agora token");
 
-        tokenRef.current = { token: tokenData.token, expiresAt: tokenData.expiresAt };
+        // Join channel
+        await client.join(data.appId, data.channelName, data.token, data.uid);
 
-        await client.join(tokenData.appId, channelName, tokenData.token, tokenData.uid);
-        console.log("✅ Joined channel");
-
-        // Subscribe to already present users
-        if (client.remoteUsers && client.remoteUsers.length > 0) {
-          console.log("Found existing users:", client.remoteUsers.map(u => u.uid));
-          for (const user of client.remoteUsers) {
-            try {
-              if (user.hasAudio) {
-                await client.subscribe(user, "audio");
-                if (user.audioTrack) {
-                  const audioPlayPromise = user.audioTrack.play();
-                  if (audioPlayPromise && typeof audioPlayPromise.catch === 'function') {
-                    audioPlayPromise.catch(e => console.warn("Auto-play audio failed:", e));
-                  }
-                }
-                console.log(`✅ Subscribed to existing audio from ${user.uid}`);
-              }
-              if (user.hasVideo) {
-                await client.subscribe(user, "video");
-                const container = document.getElementById("remote-player");
-                if (container && user.videoTrack) {
-                  const div = document.createElement("div");
-                  div.id = `player-${user.uid}`;
-                  div.className = "w-full h-full";
-                  container.appendChild(div);
-                  setTimeout(() => {
-                    try {
-                      const videoPlayPromise = user.videoTrack.play(`player-${user.uid}`);
-                      if (videoPlayPromise && typeof videoPlayPromise.catch === 'function') {
-                        videoPlayPromise.catch(e => console.warn("Auto-play video failed:", e));
-                      }
-                    } catch (e) {
-                      console.warn("Auto-play video failed:", e);
-                    }
-                  }, 300);
-                }
-                console.log(`✅ Subscribed to existing video from ${user.uid}`);
-              }
-              setRemoteUsers(prev => [...prev.filter(u => u.uid !== user.uid), user]);
-            } catch (err) {
-              console.warn("Auto-subscribe failed:", err);
-            }
-          }
-        }
-
+        // Network quality monitoring
         client.on("network-quality", (stats) => {
-          if (!componentMounted.current) return;
-          const worst = Math.max(stats.uplinkNetworkQuality, stats.downlinkNetworkQuality);
-          if (worst <= 2) setNetworkQuality("good");
-          else if (worst <= 4) setNetworkQuality("poor");
+          const quality = stats.uplinkNetworkQuality;
+          if (quality <= 2) setNetworkQuality("good");
+          else if (quality <= 4) setNetworkQuality("poor");
           else setNetworkQuality("bad");
         });
 
-        try {
-          await client.enableDualStream();
-          client.setLowStreamParameter({
-            width: 320,
-            height: 240,
-            framerate: 12,
-            bitrate: 150,
-          });
-        } catch (err) {
-          console.warn("Dual stream failed:", err);
-        }
+        // Enable dual stream for adaptive quality
+        await client.enableDualStream();
+        client.setLowStreamParameter({
+          width: 320,
+          height: 240,
+          framerate: 15,
+          bitrate: 140,
+        });
 
+        // Create local tracks with optimized settings
         let audio: ILocalAudioTrack | null = null;
         let video: ILocalVideoTrack | null = null;
 
         try {
-          audio = await AgoraRTC.createMicrophoneAudioTrack({
-            AEC: true,
-            AGC: true,
-            ANS: true,
-            encoderConfig: {
-              sampleRate: 48000,
-              stereo: false,
-              bitrate: 64,
+          [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
+            {
+              AEC: true, // Acoustic Echo Cancellation
+              AGC: true, // Auto Gain Control
+              ANS: true, // Automatic Noise Suppression
             },
+            {
+              encoderConfig: {
+                width: 640,
+                height: 480,
+                frameRate: 24, // Lower from 30 to reduce load
+                bitrateMin: 400,
+                bitrateMax: 800, // Reduced from 900 for stability
+              },
+              optimizationMode: "detail", // Better for faces
+            }
+          );
+        } catch (err: any) {
+          console.error("Track creation error:", err);
+          toast({ 
+            title: "Camera/Mic Error", 
+            description: "Trying audio-only mode...", 
+            variant: "destructive" 
           });
-
-          video = await AgoraRTC.createCameraVideoTrack({
-            encoderConfig: {
-              width: 640,
-              height: 480,
-              frameRate: 15,
-              bitrateMin: 400,
-              bitrateMax: 900,
-            },
-            optimizationMode: "motion",
-            facingMode: "user",
-          });
-        } catch (err) {
-          console.error("Track error:", err);
-          if (!audio) {
+          try {
             audio = await AgoraRTC.createMicrophoneAudioTrack({
               AEC: true,
               AGC: true,
               ANS: true,
             });
+          } catch (audioErr) {
+            throw new Error("Could not access microphone");
           }
-          toast({
-            title: "Camera unavailable",
-            description: "Audio-only mode",
-            variant: "destructive",
-          });
         }
 
         localAudioRef.current = audio;
         localVideoRef.current = video;
 
+        // Play local video
         if (video) {
-          try {
-            const playPromise = video.play("local-player");
-            if (playPromise && typeof playPromise.catch === 'function') {
-              playPromise.catch(e => console.warn("Local play failed:", e));
-            }
-          } catch (e) {
-            console.warn("Local play failed:", e);
-          }
+          await video.play("local-player");
         }
 
-        const tracks = [audio, video].filter(Boolean) as any[];
-        if (tracks.length > 0) {
-          await client.publish(tracks);
-          console.log("✅ Published tracks");
+        // Publish tracks
+        const publishArr = [audio, video].filter(Boolean) as any[];
+        if (publishArr.length > 0) {
+          await client.publish(publishArr);
         }
 
+        // Remote user handling with improved error recovery
         client.on("user-published", async (user, mediaType) => {
-          if (!componentMounted.current) return;
-          console.log(`📥 User ${user.uid} published ${mediaType}`);
-
           try {
-            const subState = subscriptionRef.current.get(user.uid) || {};
-
-            if ((mediaType === "video" && subState.video) || (mediaType === "audio" && subState.audio)) {
-              console.log(`Already subscribed to ${mediaType} from ${user.uid}`);
-              return;
-            }
-
-            await new Promise(r => setTimeout(r, 300));
-
-            if (client.connectionState !== "CONNECTED") {
-              console.warn("Connection not ready");
-              return;
-            }
-
             await client.subscribe(user, mediaType);
-            console.log(`✅ Subscribed to ${mediaType} from ${user.uid}`);
-
-            subState[mediaType === "video" ? "video" : "audio"] = true;
-            subscriptionRef.current.set(user.uid, subState);
 
             if (mediaType === "video") {
-              const old = document.getElementById(`player-${user.uid}`);
-              if (old) old.remove();
+              // Request low stream for better stability on weak networks
+              if (networkQuality !== "good") {
+                await client.setRemoteVideoStreamType(user.uid, 1); // 1 = low stream
+              }
 
-              const container = document.getElementById("remote-player");
-              if (!container) return;
+              // Create player element
+              const existingPlayer = document.getElementById(`player-${user.uid}`);
+              if (existingPlayer) existingPlayer.remove();
 
-              const div = document.createElement("div");
-              div.id = `player-${user.uid}`;
-              div.className = "w-full h-full";
-              container.appendChild(div);
+              const el = document.createElement("div");
+              el.id = `player-${user.uid}`;
+              el.className = "w-full h-full";
+              document.getElementById("remote-player")?.append(el);
 
-              setTimeout(() => {
-                try {
-                  if (user.videoTrack) {
-                    const playPromise = user.videoTrack.play(`player-${user.uid}`);
-                    if (playPromise && typeof playPromise.catch === 'function') {
-                      playPromise.catch(e => console.warn("Video play failed:", e));
+              // Play with retry logic
+              const playVideo = async (retries = 3) => {
+                for (let i = 0; i < retries; i++) {
+                  try {
+                    await new Promise(r => setTimeout(r, 300 * (i + 1))); // Increasing delay
+                    user.videoTrack?.play(`player-${user.uid}`);
+                    break;
+                  } catch (err) {
+                    console.warn(`Video play attempt ${i + 1} failed:`, err);
+                    if (i === retries - 1) {
+                      toast({ 
+                        title: "Video Issue", 
+                        description: "Remote video may not display properly",
+                        variant: "destructive"
+                      });
                     }
                   }
-                } catch (e) {
-                  console.warn("Video play failed:", e);
                 }
-              }, 500);
+              };
+              await playVideo();
             }
 
             if (mediaType === "audio") {
-              try {
-                if (user.audioTrack) {
-                  const playPromise = user.audioTrack.play();
-                  if (playPromise && typeof playPromise.catch === 'function') {
-                    playPromise.catch(e => console.warn("Audio play failed:", e));
-                  }
-                }
-              } catch (e) {
-                console.warn("Audio play failed:", e);
-              }
+              user.audioTrack?.play();
             }
 
-            if (componentMounted.current) {
-              setRemoteUsers(prev => {
-                const filtered = prev.filter(u => u.uid !== user.uid);
-                return [...filtered, user];
-              });
-            }
+            setRemoteUsers((prev) => {
+              const filtered = prev.filter((u) => u.uid !== user.uid);
+              return [...filtered, user];
+            });
           } catch (err) {
             console.error("Subscribe error:", err);
+            toast({ 
+              title: "Connection Issue", 
+              description: "Failed to receive remote stream",
+              variant: "destructive"
+            });
           }
         });
 
         client.on("user-unpublished", (user, mediaType) => {
-          console.log(`User ${user.uid} unpublished ${mediaType}`);
           if (mediaType === "video") {
             document.getElementById(`player-${user.uid}`)?.remove();
-            const subState = subscriptionRef.current.get(user.uid) || {};
-            subState.video = false;
-            subscriptionRef.current.set(user.uid, subState);
           }
+          setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
         });
 
+        // Handle user leaving
         client.on("user-left", (user) => {
-          console.log(`User ${user.uid} left`);
           document.getElementById(`player-${user.uid}`)?.remove();
-          subscriptionRef.current.delete(user.uid);
-          if (componentMounted.current) {
-            setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
+          setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
+        });
+
+        // Exception handling
+        client.on("exception", (event) => {
+          console.warn("Agora exception:", event);
+          if (event.code === 1005) { // RECV_VIDEO_DECODE_FAILED
+            console.log("Attempting to recover from decode failure...");
+            // The SDK usually auto-recovers, but we can log it
           }
         });
 
-        client.on("connection-state-change", (curState, prevState) => {
-          console.log(`Connection: ${prevState} → ${curState}`);
-
-          if (curState === "DISCONNECTED" && prevState !== "DISCONNECTING" && componentMounted.current) {
-            toast({
-              title: "Disconnected",
-              description: "Call ended",
-              variant: "destructive",
+        // Connection state monitoring
+        client.on("connection-state-change", (curState, prevState, reason) => {
+          console.log(`Connection: ${prevState} -> ${curState}, reason: ${reason}`);
+          if (curState === "DISCONNECTED" || curState === "DISCONNECTING") {
+            toast({ 
+              title: "Connection Lost", 
+              description: "Attempting to reconnect...",
+              variant: "destructive"
             });
-            endCall(false);
           }
         });
 
-        socket?.emit("call:start", {
-          channelName,
-          userId: localStorage.getItem("userId"),
+        // Notify socket
+        socket?.emit("call:start", { 
+          channelName, 
+          userId: localStorage.getItem("userId") 
         });
 
-        startWebSocketHealth();
-
+        // Start timer
         startTime.current = Date.now();
         timerRef.current = setInterval(() => {
-          if (!componentMounted.current) return;
           const elapsed = Math.floor((Date.now() - startTime.current) / 1000);
           setDurationSec(elapsed);
         }, 1000);
-        
-        if (componentMounted.current) {
-          setJoined(true);
-        }
+        setJoined(true);
 
-        if (durationMin > 0) {
-          callLimitTimeoutRef.current = setTimeout(() => {
-            if (componentMounted.current) {
-              console.log("⏰ Time limit reached");
-              endCall(false);
-            }
-          }, durationMin * 60 * 1000);
-        }
-      } catch (err: any) {
-        console.error("Init error:", err);
-        if (componentMounted.current) {
-          toast({
-            title: "Call Failed",
-            description: err.message || "Could not connect",
-            variant: "destructive",
+        // Auto-end after time limit
+        const msLimit = durationMin * 60 * 1000;
+        callLimitTimeoutRef.current = setTimeout(() => {
+          toast({ 
+            title: "⏰ Time's up", 
+            description: "The paid time has ended." 
           });
-          navigate("/dashboard");
-        }
+          endCall(false);
+        }, msLimit);
+
+      } catch (err: any) {
+        console.error("Join error:", err);
+        toast({ 
+          title: "Call Failed", 
+          description: err.message || "Could not join call.", 
+          variant: "destructive" 
+        });
+        navigate("/dashboard");
       } finally {
         joinInProgress.current = false;
       }
@@ -406,97 +280,101 @@ const CallRoom: React.FC = () => {
 
     initCall();
 
-    const handleCallEnded = () => {
-      if (componentMounted.current) {
-        console.log("Call ended from server");
+    // Socket listener for remote end
+    const handleCallEnded = (payload: any) => {
+      if (payload.channelName === channelName) {
         endCall(true);
       }
     };
     socket?.on("call:ended", handleCallEnded);
 
-    // 🔥 CRITICAL: Only cleanup timers, NOT the call itself
     return () => {
-      componentMounted.current = false;
       socket?.off("call:ended", handleCallEnded);
       if (timerRef.current) clearInterval(timerRef.current);
       if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
-      if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
-      // DO NOT call endCall() here - it will be called by user action or server event
+      endCall(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelName]);
 
-  // Separate cleanup effect for when user navigates away
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      endCall(true);
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      // Only end call when component is actually being unmounted (user left page)
-      if (!componentMounted.current) {
-        endCall(true);
-      }
-    };
-  }, []);
-
   const toggleMic = async () => {
     const audio = localAudioRef.current;
-    if (!audio) return;
+    if (!audio) {
+      toast({ title: "No microphone available" });
+      return;
+    }
     try {
-      await audio.setEnabled(!isMicOn);
-      setIsMicOn(!isMicOn);
+      const newState = !isMicOn;
+      await audio.setEnabled(newState);
+      setIsMicOn(newState);
     } catch (err) {
-      console.error("Mic toggle:", err);
+      console.error("Mic toggle error:", err);
+      toast({ title: "Failed to toggle microphone", variant: "destructive" });
     }
   };
 
   const toggleCamera = async () => {
     const video = localVideoRef.current;
-    if (!video) return;
-    try {
-      await video.setEnabled(!isCamOn);
-      setIsCamOn(!isCamOn);
-    } catch (err) {
-      console.error("Camera toggle:", err);
+    if (!video) {
+      toast({ title: "No camera available" });
+      return;
     }
-  };
-
-  const swapViews = () => {
-    setIsSwapped(!isSwapped);
+    try {
+      const newState = !isCamOn;
+      await video.setEnabled(newState);
+      setIsCamOn(newState);
+    } catch (err) {
+      console.error("Camera toggle error:", err);
+      toast({ title: "Failed to toggle camera", variant: "destructive" });
+    }
   };
 
   const endCall = async (silent = false) => {
     if (isCleaningUp.current) return;
     isCleaningUp.current = true;
-    componentMounted.current = false;
 
     try {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
-      if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
+      // Clear timers
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (callLimitTimeoutRef.current) {
+        clearTimeout(callLimitTimeoutRef.current);
+        callLimitTimeoutRef.current = null;
+      }
 
+      // Unpublish and leave
       const client = clientRef.current;
       if (client) {
         try {
+          await client.unpublish();
+        } catch (err) {
+          console.warn("Unpublish error:", err);
+        }
+
+        try {
           await client.leave();
-        } catch {}
+        } catch (err) {
+          console.warn("Leave error:", err);
+        }
+
         client.removeAllListeners();
         clientRef.current = null;
       }
 
+      // Stop tracks
       await stopTracks();
+
+      // Update state
       setJoined(false);
       setRemoteUsers([]);
-      subscriptionRef.current.clear();
 
-      const elapsedSec = Math.floor((Date.now() - (startTime.current || Date.now())) / 1000);
-      socket?.emit("call:end", { channelName, durationSec: elapsedSec });
+      // Notify backend
+      socket?.emit("call:end", { channelName, durationSec });
 
       if (!silent) {
-        toast({ title: "Call ended" });
+        toast({ title: "Call Ended" });
         navigate("/dashboard");
       }
     } catch (err) {
@@ -513,99 +391,88 @@ const CallRoom: React.FC = () => {
   };
 
   const getNetworkIcon = () => {
-    if (networkQuality === "good") return <Wifi className="w-4 h-4 text-green-500" />;
-    if (networkQuality === "poor") return <Wifi className="w-4 h-4 text-yellow-500" />;
-    return <Wifi className="w-4 h-4 text-red-500" />;
+    switch (networkQuality) {
+      case "good": return <Wifi className="w-4 h-4 text-green-500" />;
+      case "poor": return <Wifi className="w-4 h-4 text-yellow-500" />;
+      case "bad": return <Wifi className="w-4 h-4 text-red-500" />;
+    }
   };
 
   return (
-    <div className="h-screen bg-gray-900 text-white flex flex-col relative overflow-hidden">
-      <div className="flex-1 relative bg-black">
-        <div
-          id={isSwapped ? "local-player" : "remote-player"}
-          className="w-full h-full flex items-center justify-center"
-        >
-          {!isSwapped && remoteUsers.length === 0 && (
-            <div className="text-center">
-              <div className="text-gray-400 text-lg mb-2 animate-pulse">
-                Waiting for other person...
-              </div>
-              <div className="text-gray-500 text-sm">{joined ? "Connected" : "Connecting..."}</div>
+    <div className="h-screen bg-gray-900 text-white flex flex-col">
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2 p-4">
+        {/* Local video */}
+        <div className="relative bg-black rounded-lg overflow-hidden">
+          <div 
+            id="local-player" 
+            className="w-full h-full flex items-center justify-center"
+          >
+            {!joined && (
+              <div className="text-gray-400 animate-pulse">Connecting...</div>
+            )}
+          </div>
+          <div className="absolute top-2 left-2 bg-black/50 px-2 py-1 rounded text-xs">
+            You
+          </div>
+        </div>
+
+        {/* Remote video */}
+        <div className="relative bg-black rounded-lg overflow-hidden">
+          <div 
+            id="remote-player" 
+            className="w-full h-full flex items-center justify-center"
+          >
+            {remoteUsers.length === 0 && (
+              <p className="text-gray-400 animate-pulse">Waiting for remote user...</p>
+            )}
+          </div>
+          {remoteUsers.length > 0 && (
+            <div className="absolute top-2 left-2 bg-black/50 px-2 py-1 rounded text-xs">
+              Remote User
             </div>
           )}
         </div>
-
-        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/70 to-transparent p-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full">
-              <Clock className="w-4 h-4" />
-              <span className="text-sm font-medium">{format(durationSec)}</span>
-            </div>
-            <div
-              className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full"
-              title={`Network: ${networkQuality}`}
-            >
-              {getNetworkIcon()}
-            </div>
-          </div>
-        </div>
-
-        <div className="absolute top-20 right-4 w-24 h-32 sm:w-28 sm:h-36 md:w-32 md:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700">
-          <div id={isSwapped ? "remote-player" : "local-player"} className="w-full h-full">
-            {!joined && !isSwapped && (
-              <div className="flex items-center justify-center h-full text-gray-500 text-xs">
-                Connecting...
-              </div>
-            )}
-          </div>
-
-          <button
-            onClick={swapViews}
-            className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 p-1.5 rounded-full transition-all active:scale-95"
-          >
-            <Maximize2 className="w-3 h-3 sm:w-4 sm:h-4" />
-          </button>
-
-          <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">
-            {isSwapped ? "Remote" : "You"}
-          </div>
-        </div>
       </div>
 
-      <div className="bg-gray-800 border-t border-gray-700 p-4 pb-6">
-        <div className="flex justify-center items-center gap-3 sm:gap-4 max-w-md mx-auto">
-          <button
-            onClick={toggleMic}
-            className={`p-3 sm:p-4 rounded-full transition-all active:scale-95 ${
-              isMicOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
-            }`}
-          >
-            {isMicOn ? (
-              <Mic className="w-5 h-5 sm:w-6 sm:h-6" />
-            ) : (
-              <MicOff className="w-5 h-5 sm:w-6 sm:h-6" />
-            )}
-          </button>
+      {/* Controls */}
+      <div className="p-4 flex flex-col items-center gap-3 bg-gray-800 border-t border-gray-700">
+        <div className="flex items-center gap-4 text-sm text-gray-400">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4" /> 
+            <span>{format(durationSec)}</span>
+          </div>
+          <div className="flex items-center gap-2" title={`Network: ${networkQuality}`}>
+            {getNetworkIcon()}
+          </div>
+        </div>
 
-          <button
-            onClick={toggleCamera}
-            className={`p-3 sm:p-4 rounded-full transition-all active:scale-95 ${
-              isCamOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
-            }`}
+        <div className="flex justify-center gap-4 flex-wrap">
+          <Button 
+            onClick={toggleMic} 
+            variant={isMicOn ? "outline" : "destructive"}
+            className="gap-2"
           >
-            {isCamOn ? (
-              <Video className="w-5 h-5 sm:w-6 sm:h-6" />
-            ) : (
-              <VideoOff className="w-5 h-5 sm:w-6 sm:h-6" />
-            )}
-          </button>
-
-          <button
-            onClick={() => endCall(false)}
-            className="p-3 sm:p-4 rounded-full bg-red-600 hover:bg-red-700 transition-all active:scale-95"
+            {isMicOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+            {isMicOn ? "Mute" : "Unmute"}
+          </Button>
+          
+          <Button 
+            onClick={toggleCamera} 
+            variant={isCamOn ? "outline" : "destructive"}
+            className="gap-2"
           >
-            <PhoneOff className="w-5 h-5 sm:w-6 sm:h-6" />
-          </button>
+            {isCamOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
+            {isCamOn ? "Stop Video" : "Start Video"}
+          </Button>
+          
+          <Button 
+            onClick={() => endCall(false)} 
+            variant="destructive"
+            className="gap-2"
+          >
+            <PhoneOff className="w-4 h-4" />
+            Leave Call
+          </Button>
         </div>
       </div>
     </div>
