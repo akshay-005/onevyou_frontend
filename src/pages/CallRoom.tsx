@@ -1,4 +1,4 @@
-// frontend/src/pages/CallRoom.tsx
+// frontend/src/pages/CallRoom.tsx - PERMANENT FIX
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AgoraRTC, { IAgoraRTCClient, ILocalVideoTrack, ILocalAudioTrack } from "agora-rtc-sdk-ng";
@@ -6,7 +6,7 @@ import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "
 import { useSocket } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
 
-AgoraRTC.setLogLevel(3); // Errors only
+AgoraRTC.setLogLevel(3);
 
 const CallRoom: React.FC = () => {
   const { channelName } = useParams();
@@ -15,14 +15,11 @@ const CallRoom: React.FC = () => {
   const socket = useSocket();
 
   const clientRef = useRef<IAgoraRTCClient | null>(null);
-  
   const localAudioRef = useRef<ILocalAudioTrack | null>(null);
   const localVideoRef = useRef<ILocalVideoTrack | null>(null);
   const joinInProgress = useRef(false);
   const isCleaningUp = useRef(false);
-  // prevent multiple event handlers being attached
-const callEndedHandlerInstalled = useRef(false);
-
+  const componentMounted = useRef(true); // Track if component is still mounted
   const wsHealthInterval = useRef<NodeJS.Timeout | null>(null);
   const tokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
   const subscriptionRef = useRef<Map<number, { audio?: boolean; video?: boolean }>>(new Map());
@@ -60,31 +57,25 @@ const callEndedHandlerInstalled = useRef(false);
     }
   };
 
-  // Refresh token before expiry
   const refreshTokenIfNeeded = async () => {
     try {
-      if (!tokenRef.current) return;
+      if (!tokenRef.current || !componentMounted.current) return;
       const now = Date.now();
       const timeUntilExpiry = tokenRef.current.expiresAt - now;
 
-      // If less than 5 minutes left, refresh immediately
       if (timeUntilExpiry < 5 * 60 * 1000) {
-        console.log("Token expiring soon, refreshing...");
+        console.log("Refreshing token...");
         const res = await fetch(
           `${API_BASE}/api/agora/renew?channelName=${channelName}&durationMin=${durationMin}`,
           { method: "POST" }
         );
         const data = await res.json();
-        if (data.success) {
+        if (data.success && componentMounted.current) {
           tokenRef.current = { token: data.token, expiresAt: data.expiresAt };
           const client = clientRef.current;
           if (client && client.connectionState === "CONNECTED") {
-            try {
-              await client.renewToken(data.token);
-              console.log("✅ Token renewed");
-            } catch (err) {
-              console.warn("Token renewal failed:", err);
-            }
+            await client.renewToken(data.token);
+            console.log("✅ Token renewed");
           }
         }
       }
@@ -93,11 +84,11 @@ const callEndedHandlerInstalled = useRef(false);
     }
   };
 
-  // WebSocket keep-alive
   const startWebSocketHealth = () => {
     if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
 
     wsHealthInterval.current = setInterval(async () => {
+      if (!componentMounted.current) return;
       const client = clientRef.current;
       if (!client || client.connectionState !== "CONNECTED") return;
 
@@ -109,13 +100,11 @@ const callEndedHandlerInstalled = useRef(false);
       }
 
       await refreshTokenIfNeeded();
-    }, 10000); // Every 10 seconds
+    }, 10000);
   };
 
-
-
   useEffect(() => {
-   
+    componentMounted.current = true;
 
     if (!channelName || joinInProgress.current || isCleaningUp.current) return;
 
@@ -124,17 +113,6 @@ const callEndedHandlerInstalled = useRef(false);
       await stopTracks();
       subscriptionRef.current.clear();
 
-      if (clientRef.current) {
-  try {
-    console.log("🧹 Cleaning old Agora client before new join");
-    await clientRef.current.leave();
-  } catch (e) {
-    console.warn("Old client leave error:", e);
-  }
-  clientRef.current.removeAllListeners();
-  clientRef.current = null;
-}
-
       const client = AgoraRTC.createClient({
         mode: "rtc",
         codec: "h264",
@@ -142,7 +120,6 @@ const callEndedHandlerInstalled = useRef(false);
       clientRef.current = client;
 
       try {
-        // Fetch token with duration
         const tokenRes = await fetch(
           `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
         );
@@ -151,85 +128,58 @@ const callEndedHandlerInstalled = useRef(false);
 
         tokenRef.current = { token: tokenData.token, expiresAt: tokenData.expiresAt };
 
-        // Join channel
-        await new Promise((r) => setTimeout(r, 300));
         await client.join(tokenData.appId, channelName, tokenData.token, tokenData.uid);
         console.log("✅ Joined channel");
 
-        // ✅ Subscribe to existing users already in the channel
-// ✅ Resubscribe to all remote users (audio + video) already in the channel
-if (client.remoteUsers && client.remoteUsers.length > 0) {
-  console.log("📡 Found existing remote users:", client.remoteUsers.map(u => u.uid));
-  for (const user of client.remoteUsers) {
-    try {
-      await client.subscribe(user, "audio");
-      user.audioTrack?.play();
-      console.log(`✅ Subscribed to existing audio from ${user.uid}`);
-    } catch (err) {
-      console.warn("Auto-subscribe existing audio failed:", err);
-    }
+        // Subscribe to already present users
+        if (client.remoteUsers && client.remoteUsers.length > 0) {
+          console.log("Found existing users:", client.remoteUsers.map(u => u.uid));
+          for (const user of client.remoteUsers) {
+            try {
+              if (user.hasAudio) {
+                await client.subscribe(user, "audio");
+                user.audioTrack?.play();
+                console.log(`✅ Subscribed to existing audio from ${user.uid}`);
+              }
+              if (user.hasVideo) {
+                await client.subscribe(user, "video");
+                const container = document.getElementById("remote-player");
+                if (container) {
+                  const div = document.createElement("div");
+                  div.id = `player-${user.uid}`;
+                  div.className = "w-full h-full";
+                  container.appendChild(div);
+                  setTimeout(() => user.videoTrack?.play(`player-${user.uid}`), 300);
+                }
+                console.log(`✅ Subscribed to existing video from ${user.uid}`);
+              }
+              setRemoteUsers(prev => [...prev.filter(u => u.uid !== user.uid), user]);
+            } catch (err) {
+              console.warn("Auto-subscribe failed:", err);
+            }
+          }
+        }
 
-    try {
-      await client.subscribe(user, "video");
-      const container = document.getElementById("remote-player");
-      if (container) {
-        const div = document.createElement("div");
-        div.id = `player-${user.uid}`;
-        div.className = "w-full h-full";
-        container.appendChild(div);
-        user.videoTrack?.play(`player-${user.uid}`);
-      }
-      console.log(`✅ Subscribed to existing video from ${user.uid}`);
-    } catch (err) {
-      console.warn("Auto-subscribe existing video failed:", err);
-    }
-  }
-}
-
-
-        // Network monitoring
         client.on("network-quality", (stats) => {
+          if (!componentMounted.current) return;
           const worst = Math.max(stats.uplinkNetworkQuality, stats.downlinkNetworkQuality);
           if (worst <= 2) setNetworkQuality("good");
           else if (worst <= 4) setNetworkQuality("poor");
           else setNetworkQuality("bad");
         });
 
-        // Enable dual stream + optimize quality
-try {
-  await client.enableDualStream();
-  await client.setLowStreamParameter({
-    width: 320,
-    height: 240,
-    framerate: 12,
-    bitrate: 200, // slightly higher for stability
-  });
+        try {
+          await client.enableDualStream();
+          client.setLowStreamParameter({
+            width: 320,
+            height: 240,
+            framerate: 12,
+            bitrate: 150,
+          });
+        } catch (err) {
+          console.warn("Dual stream failed:", err);
+        }
 
-  // Force remote users to use high-quality stream (0)
-  client.on("user-published", async (user, mediaType) => {
-    if (mediaType === "video") {
-      try {
-        await client.setRemoteVideoStreamType(user.uid, 0); // 0 = high
-        console.log(`🎥 Forced high stream for ${user.uid}`);
-      } catch (err) {
-        console.warn("setRemoteVideoStreamType failed:", err);
-      }
-    }
-  });
-} catch (err) {
-  console.warn("Dual stream setup failed:", err);
-}
-
-
-client.on("user-joined", (user) => {
-  console.log("👋 Remote user joined:", user.uid);
-});
-client.on("user-left", (user) => {
-  console.log("🚪 Remote user left:", user.uid);
-});
-
-
-        // Create tracks
         let audio: ILocalAudioTrack | null = null;
         let video: ILocalVideoTrack | null = null;
 
@@ -258,83 +208,59 @@ client.on("user-left", (user) => {
           });
         } catch (err) {
           console.error("Track error:", err);
-          try {
-            if (!audio) {
-              audio = await AgoraRTC.createMicrophoneAudioTrack({
-                AEC: true,
-                AGC: true,
-                ANS: true,
-              });
-            }
-            toast({
-              title: "Camera unavailable",
-              description: "Audio-only mode",
-              variant: "destructive",
+          if (!audio) {
+            audio = await AgoraRTC.createMicrophoneAudioTrack({
+              AEC: true,
+              AGC: true,
+              ANS: true,
             });
-          } catch {
-            throw new Error("No media access");
           }
+          toast({
+            title: "Camera unavailable",
+            description: "Audio-only mode",
+            variant: "destructive",
+          });
         }
 
         localAudioRef.current = audio;
         localVideoRef.current = video;
 
         if (video) {
-          try {
-            video.play("local-player");
-          } catch (err) {
-            console.warn("Local play failed:", err);
-          }
+          video.play("local-player").catch(e => console.warn("Local play failed:", e));
         }
 
-        // Publish tracks
         const tracks = [audio, video].filter(Boolean) as any[];
         if (tracks.length > 0) {
           await client.publish(tracks);
           console.log("✅ Published tracks");
         }
 
-        // Remote user handlers - FIXED: Proper subscription tracking
         client.on("user-published", async (user, mediaType) => {
+          if (!componentMounted.current) return;
           console.log(`📥 User ${user.uid} published ${mediaType}`);
 
           try {
-            // Get subscription state for this user
             const subState = subscriptionRef.current.get(user.uid) || {};
 
-            // Skip if already subscribed to this media type
-            if (mediaType === "video" && subState.video) {
-              console.log(`Already subscribed to video from ${user.uid}`);
-              return;
-            }
-            if (mediaType === "audio" && subState.audio) {
-              console.log(`Already subscribed to audio from ${user.uid}`);
+            if ((mediaType === "video" && subState.video) || (mediaType === "audio" && subState.audio)) {
+              console.log(`Already subscribed to ${mediaType} from ${user.uid}`);
               return;
             }
 
-            // Wait for connection stability
-            await new Promise((r) => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 300));
 
-            // Check connection
             if (client.connectionState !== "CONNECTED") {
               console.warn("Connection not ready");
               return;
             }
 
-            // Subscribe
             await client.subscribe(user, mediaType);
             console.log(`✅ Subscribed to ${mediaType} from ${user.uid}`);
 
-            // Track subscription
             subState[mediaType === "video" ? "video" : "audio"] = true;
             subscriptionRef.current.set(user.uid, subState);
 
-            // Handle video
             if (mediaType === "video") {
-              try {
-                await client.setRemoteVideoStreamType(user.uid, 1);
-              } catch {}
-
               const old = document.getElementById(`player-${user.uid}`);
               if (old) old.remove();
 
@@ -347,29 +273,20 @@ client.on("user-left", (user) => {
               container.appendChild(div);
 
               setTimeout(() => {
-                try {
-                  user.videoTrack?.play(`player-${user.uid}`);
-                  console.log(`✅ Video playing from ${user.uid}`);
-                } catch (err) {
-                  console.warn("Video play failed:", err);
-                }
+                user.videoTrack?.play(`player-${user.uid}`).catch(e => console.warn("Video play failed:", e));
               }, 500);
             }
 
-            // Handle audio
             if (mediaType === "audio") {
-              try {
-                user.audioTrack?.play();
-                console.log(`✅ Audio playing from ${user.uid}`);
-              } catch (err) {
-                console.warn("Audio play failed:", err);
-              }
+              user.audioTrack?.play().catch(e => console.warn("Audio play failed:", e));
             }
 
-            setRemoteUsers((prev) => {
-              const filtered = prev.filter((u) => u.uid !== user.uid);
-              return [...filtered, user];
-            });
+            if (componentMounted.current) {
+              setRemoteUsers(prev => {
+                const filtered = prev.filter(u => u.uid !== user.uid);
+                return [...filtered, user];
+              });
+            }
           } catch (err) {
             console.error("Subscribe error:", err);
           }
@@ -389,18 +306,15 @@ client.on("user-left", (user) => {
           console.log(`User ${user.uid} left`);
           document.getElementById(`player-${user.uid}`)?.remove();
           subscriptionRef.current.delete(user.uid);
-          setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
+          if (componentMounted.current) {
+            setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
+          }
         });
 
-        client.on("exception", (event) => {
-          console.warn("Agora exception:", event.code);
-        });
-
-        // Connection state handler
         client.on("connection-state-change", (curState, prevState) => {
           console.log(`Connection: ${prevState} → ${curState}`);
 
-          if (curState === "DISCONNECTED" && prevState !== "DISCONNECTING") {
+          if (curState === "DISCONNECTED" && prevState !== "DISCONNECTING" && componentMounted.current) {
             toast({
               title: "Disconnected",
               description: "Call ended",
@@ -410,7 +324,6 @@ client.on("user-left", (user) => {
           }
         });
 
-        // Notify backend
         socket?.emit("call:start", {
           channelName,
           userId: localStorage.getItem("userId"),
@@ -418,44 +331,35 @@ client.on("user-left", (user) => {
 
         startWebSocketHealth();
 
-        // Start timer
         startTime.current = Date.now();
-        if (timerRef.current) clearInterval(timerRef.current);
-timerRef.current = setInterval(() => {
-  const elapsed = Math.floor((Date.now() - startTime.current) / 1000);
-  setDurationSec(elapsed);
+        timerRef.current = setInterval(() => {
+          if (!componentMounted.current) return;
+          const elapsed = Math.floor((Date.now() - startTime.current) / 1000);
+          setDurationSec(elapsed);
+        }, 1000);
+        
+        if (componentMounted.current) {
+          setJoined(true);
+        }
 
-  // ⏰ Safety cutoff
-  if (elapsed >= durationMin * 60) {
-    console.log("Auto-cutoff triggered from timer");
-    if (timerRef.current) clearInterval(timerRef.current);
-    endCall(false);
-  }
-}, 1000);
-
-
-        setJoined(true);
-
-        // Auto-end timer
         if (durationMin > 0) {
           callLimitTimeoutRef.current = setTimeout(() => {
-  console.log("⏰ Call duration ended — auto-ending now");
-  if (timerRef.current) clearInterval(timerRef.current);
-  setDurationSec(durationMin * 60);
-  endCall(false);
-}, durationMin * 60 * 1000);
-
-
-
+            if (componentMounted.current) {
+              console.log("⏰ Time limit reached");
+              endCall(false);
+            }
+          }, durationMin * 60 * 1000);
         }
       } catch (err: any) {
         console.error("Init error:", err);
-        toast({
-          title: "Call Failed",
-          description: err.message || "Could not connect",
-          variant: "destructive",
-        });
-        navigate("/dashboard");
+        if (componentMounted.current) {
+          toast({
+            title: "Call Failed",
+            description: err.message || "Could not connect",
+            variant: "destructive",
+          });
+          navigate("/dashboard");
+        }
       } finally {
         joinInProgress.current = false;
       }
@@ -464,32 +368,40 @@ timerRef.current = setInterval(() => {
     initCall();
 
     const handleCallEnded = () => {
-      console.log("Call ended from server");
-      endCall(true);
+      if (componentMounted.current) {
+        console.log("Call ended from server");
+        endCall(true);
+      }
     };
-    
-    // ✅ Ensure we register the event only once per socket
-if (socket && !callEndedHandlerInstalled.current) {
-  socket.on("call:ended", handleCallEnded);
-  callEndedHandlerInstalled.current = true;
-}
+    socket?.on("call:ended", handleCallEnded);
 
-
-   return () => {
-  if (socket && callEndedHandlerInstalled.current) {
-    socket.off("call:ended", handleCallEnded);
-    callEndedHandlerInstalled.current = false;
-  }
-
-  if (timerRef.current) clearInterval(timerRef.current);
-  if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
-  if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
-  // 🚫 Do NOT call endCall here — it kills the call mid-session
-};
-
-
+    // 🔥 CRITICAL: Only cleanup timers, NOT the call itself
+    return () => {
+      componentMounted.current = false;
+      socket?.off("call:ended", handleCallEnded);
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (callLimitTimeoutRef.current) clearTimeout(callLimitTimeoutRef.current);
+      if (wsHealthInterval.current) clearInterval(wsHealthInterval.current);
+      // DO NOT call endCall() here - it will be called by user action or server event
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelName]);
+
+  // Separate cleanup effect for when user navigates away
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      endCall(true);
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      // Only end call when component is actually being unmounted (user left page)
+      if (!componentMounted.current) {
+        endCall(true);
+      }
+    };
+  }, []);
 
   const toggleMic = async () => {
     const audio = localAudioRef.current;
@@ -520,6 +432,7 @@ if (socket && !callEndedHandlerInstalled.current) {
   const endCall = async (silent = false) => {
     if (isCleaningUp.current) return;
     isCleaningUp.current = true;
+    componentMounted.current = false;
 
     try {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -540,15 +453,8 @@ if (socket && !callEndedHandlerInstalled.current) {
       setRemoteUsers([]);
       subscriptionRef.current.clear();
 
-     // ✅ Compute exact elapsed time before clearing everything
-const elapsedSec = Math.floor((Date.now() - (startTime.current || Date.now())) / 1000);
-
-// update displayed duration
-setDurationSec(elapsedSec);
-
-// send accurate elapsed time to backend
-socket?.emit("call:end", { channelName, durationSec: elapsedSec });
-
+      const elapsedSec = Math.floor((Date.now() - (startTime.current || Date.now())) / 1000);
+      socket?.emit("call:end", { channelName, durationSec: elapsedSec });
 
       if (!silent) {
         toast({ title: "Call ended" });
