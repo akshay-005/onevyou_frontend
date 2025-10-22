@@ -52,6 +52,24 @@ const CallRoom: React.FC = () => {
     hasJoinedRef.current = true;
 
     const init = async () => {
+      // 🔓 Ensure mobile browsers allow audio/video playback
+const unlockMedia = () => {
+  try {
+    const el = document.createElement("video");
+    el.muted = true;
+    el.autoplay = true;
+    el.playsInline = true;
+    el.srcObject = null;
+    document.body.appendChild(el);
+    el.play().catch(() => {});
+    document.body.removeChild(el);
+    console.log("✅ Media unlocked for mobile autoplay");
+  } catch (err) {
+    console.warn("Media unlock error:", err);
+  }
+};
+unlockMedia();
+
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "h264" });
       clientRef.current = client;
 
@@ -68,11 +86,26 @@ const CallRoom: React.FC = () => {
         // Create tracks
         let audio: ILocalAudioTrack, video: ILocalVideoTrack;
         try {
-          [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
-            { AEC: true, AGC: true, ANS: true },
-            { encoderConfig: "480p_1" }
-          );
-        } catch (err) {
+  [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
+    { AEC: true, AGC: true, ANS: true },
+    { encoderConfig: "480p_1" }
+  );
+} catch (err) {
+  console.warn("🎙️ Initial camera track creation failed, retrying once...", err);
+  await new Promise(r => setTimeout(r, 1000));
+  try {
+    [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
+      { AEC: true, AGC: true, ANS: true },
+      { encoderConfig: "480p_1" }
+    );
+  } catch (retryErr) {
+    console.error("🚫 Second track creation failed:", retryErr);
+    audio = await AgoraRTC.createMicrophoneAudioTrack();
+    video = null as any;
+    toast({ title: "Camera unavailable", description: "Audio-only mode", variant: "destructive" });
+  }
+}
+
           audio = await AgoraRTC.createMicrophoneAudioTrack();
           video = null as any;
           toast({ title: "Camera unavailable", variant: "destructive" });
@@ -105,7 +138,21 @@ const CallRoom: React.FC = () => {
                   playerDiv.className = "w-full h-full";
                   container.appendChild(playerDiv);
                 }
-                setTimeout(() => safePlay(user.videoTrack, `player-${user.uid}`), 500);
+                const tryPlay = (attempt = 1) => {
+  try {
+    user.videoTrack?.play(`player-${user.uid}`);
+    console.log(`🎥 Remote video playing for ${user.uid}`);
+  } catch (err) {
+    if (attempt < 4) {
+      console.warn(`Video play failed (attempt ${attempt})`, err);
+      setTimeout(() => tryPlay(attempt + 1), 400 * attempt);
+    } else {
+      console.error("❌ Video failed to play after retries", err);
+    }
+  }
+};
+setTimeout(() => tryPlay(), 700);
+
               }
             }
             
@@ -198,6 +245,12 @@ const CallRoom: React.FC = () => {
       const client = clientRef.current;
       if (client) {
         try {
+  await client.unpublish();
+} catch (err) {
+  console.warn("Unpublish failed:", err);
+}
+
+        try {
           await client.leave();
           client.removeAllListeners();
         } catch {}
@@ -216,6 +269,14 @@ const CallRoom: React.FC = () => {
       toast({ title: "Call ended" });
       navigate("/dashboard");
     };
+
+    // ✅ Reset refs for next session
+hasJoinedRef.current = false;
+cleanupDoneRef.current = false;
+clientRef.current = null;
+localAudioRef.current = null;
+localVideoRef.current = null;
+
 
     init();
 
