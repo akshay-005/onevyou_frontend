@@ -250,11 +250,22 @@ const Auth = () => {
         const rdata = await rres.json();
 
         if (rres.ok && rdata.success) {
+  // 🧠 Debug log for testing
+  console.log("✅ Registered user object (phone signup):", rdata.user);
+
+  // Normalize if backend sends `id` not `_id`
+  if (rdata.user && !rdata.user._id && rdata.user.id) {
+    rdata.user._id = rdata.user.id;
+  }
+
+  // ✅ Save user and token
   storeUserSession(rdata.user, rdata.token);
+
   connectSocket(rdata.token);
   toast({ title: "Welcome!", description: "Account created successfully." });
   navigate("/profile-setup");
 }
+
 
          else {
           toast({ title: "Registration failed", description: rdata.message || "Try again", variant: "destructive" });
@@ -295,6 +306,9 @@ const Auth = () => {
 
       if (res.ok && data.success) {
   storeUserSession(data.user, data.token);  // ✅ simplified helper
+  console.log("✅ User object received:", data.user);
+  console.log("✅ Token:", data.token);
+
   connectSocket(data.token);
   toast({ title: "Logged in", description: `Welcome back, ${data.user.fullName}` });
   navigate(data.user.profileComplete ? "/dashboard" : "/profile-setup");
