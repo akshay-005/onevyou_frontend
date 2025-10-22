@@ -3,8 +3,10 @@ import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AgoraRTC, { IAgoraRTCClient, ILocalVideoTrack, ILocalAudioTrack } from "agora-rtc-sdk-ng";
 import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "lucide-react";
-import { useSocket } from "@/utils/socket";
+import { useSocket, safeEmit } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
+
+
 
 AgoraRTC.setLogLevel(3);
 
@@ -202,7 +204,7 @@ setTimeout(() => tryPlay(), 700);
         }, autoEndMs);
 
         // Notify backend
-        socket?.emit("call:start", { channelName, userId: localStorage.getItem("userId") });
+        safeEmit("call:start", { channelName, userId: localStorage.getItem("userId") });
 
       } catch (err: any) {
         console.error("Init error:", err);
@@ -212,67 +214,70 @@ setTimeout(() => tryPlay(), 700);
     };
 
     const cleanup = async () => {
-      if (cleanupDoneRef.current) {
-        console.log("⚠️ Cleanup already done, skipping");
-        return;
-      }
-      
-      // Debug: Log stack trace to see WHO called cleanup
-      console.trace("🧹 Cleanup called from:");
-      
-      cleanupDoneRef.current = true;
-      console.log("🧹 Starting cleanup");
+  if (cleanupDoneRef.current) {
+    console.log("⚠️ Cleanup already done, skipping");
+    return;
+  }
 
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+  // Debug: Log stack trace to see WHO called cleanup
+  console.trace("🧹 Cleanup called from:");
 
-      if (autoEndTimerRef.current) {
-        clearTimeout(autoEndTimerRef.current);
-        autoEndTimerRef.current = null;
-      }
+  cleanupDoneRef.current = true;
+  console.log("🧹 Starting cleanup");
 
-      const elapsed = startTimeRef.current > 0 
-        ? Math.floor((Date.now() - startTimeRef.current) / 1000) 
-        : 0;
+  if (timerRef.current) {
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+  }
 
-      socket?.emit("call:end", { channelName, durationSec: elapsed });
+  if (autoEndTimerRef.current) {
+    clearTimeout(autoEndTimerRef.current);
+    autoEndTimerRef.current = null;
+  }
 
-      const client = clientRef.current;
-      if (client) {
-        try {
-  await client.unpublish();
-} catch (err) {
-  console.warn("Unpublish failed:", err);
-}
+  const elapsed =
+    startTimeRef.current > 0
+      ? Math.floor((Date.now() - startTimeRef.current) / 1000)
+      : 0;
 
-        try {
-          await client.leave();
-          client.removeAllListeners();
-        } catch {}
-      }
+  safeEmit("call:end", { channelName, durationSec: elapsed });
 
-      if (localAudioRef.current) {
-        localAudioRef.current.close();
-        localAudioRef.current = null;
-      }
-      if (localVideoRef.current) {
-        localVideoRef.current.close();
-        localVideoRef.current = null;
-      }
+  const client = clientRef.current;
+  if (client) {
+    try {
+      await client.unpublish();
+    } catch (err) {
+      console.warn("Unpublish failed:", err);
+    }
 
-      console.log("✅ Cleanup complete");
-      toast({ title: "Call ended" });
-      navigate("/dashboard");
-    };
+    try {
+      await client.leave();
+      client.removeAllListeners();
+    } catch {}
+  }
 
-    // ✅ Reset refs for next session
-hasJoinedRef.current = false;
-cleanupDoneRef.current = false;
-clientRef.current = null;
-localAudioRef.current = null;
-localVideoRef.current = null;
+  if (localAudioRef.current) {
+    localAudioRef.current.close();
+    localAudioRef.current = null;
+  }
+
+  if (localVideoRef.current) {
+    localVideoRef.current.close();
+    localVideoRef.current = null;
+  }
+
+  console.log("✅ Cleanup complete");
+  toast({ title: "Call ended" });
+  navigate("/dashboard");
+
+  // ✅ Reset refs for next session (keep this inside cleanup)
+  hasJoinedRef.current = false;
+  cleanupDoneRef.current = false;
+  clientRef.current = null;
+  localAudioRef.current = null;
+  localVideoRef.current = null;
+};
+
 
 
     init();

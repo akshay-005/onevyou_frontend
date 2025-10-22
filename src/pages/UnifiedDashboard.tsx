@@ -66,8 +66,25 @@ const UnifiedDashboard: React.FC = () => {
   const { toast } = useToast();
   const socket = useSocket();
 
+    // ✅ Listen for global toast events (e.g., reconnect notification)
+  useEffect(() => {
+    const handleAppToast = (e: any) => {
+      const { title, description } = e.detail;
+      toast({ title, description });
+    };
+
+    window.addEventListener("app-toast", handleAppToast);
+    return () => window.removeEventListener("app-toast", handleAppToast);
+  }, []);
+
+
   // UI state
-  const [isOnline, setIsOnline] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(() => {
+  // ✅ Restore from localStorage on load
+  const saved = localStorage.getItem("isOnline");
+  return saved === "true";
+});
+
   const [searchTerm, setSearchTerm] = useState("");
   const [users, setUsers] = useState<any[]>([]);
   const [incomingCall, setIncomingCall] = useState<any | null>(null);
@@ -116,10 +133,13 @@ useEffect(() => {
         setCurrentUser(res.user);
         // ✅ Only set toggle if not manually toggled and first time loading
         if (!userManuallyToggled.current && !initialLoadComplete.current) {
-          console.log("Initial load: setting isOnline to", res.user.online);
-          setIsOnline(res.user.online || false);
-          initialLoadComplete.current = true;
-        }
+  const saved = localStorage.getItem("isOnline");
+  const restored = saved === null ? res.user.online : saved === "true";
+  console.log("Initial load: setting isOnline to", restored);
+  setIsOnline(restored);
+  initialLoadComplete.current = true;
+}
+
       }
     })
     .catch((err) => {
@@ -161,6 +181,14 @@ useEffect(() => {
     console.log("Socket connected:", socket.id);
     // ✅ ALWAYS fetch users when socket connects (don't check initialLoadComplete)
     fetchOnlineUsers();
+      // ✅ Re-sync last known online status when reconnecting
+  const savedStatus = localStorage.getItem("isOnline") === "true";
+  socket.emit("user:status:update", {
+    userId: currentUser?._id || localStorage.getItem("userId"),
+    isOnline: savedStatus,
+  });
+  console.log("🔄 Restored online status from localStorage:", savedStatus);
+
   };
 
   const onUserStatus = (update: any) => {
@@ -226,6 +254,22 @@ useEffect(() => {
   };
 }, [socket]); // ✅ ONLY depend on socket object itself, not socket.connected
 
+// ✅ Keep toggle state persistent and synced automatically
+useEffect(() => {
+  // Save to localStorage every time user changes online state
+  localStorage.setItem("isOnline", isOnline.toString());
+
+  // Send to backend if socket is connected and user exists
+  if (socket && socket.connected && currentUser?._id) {
+    socket.emit("user:status:update", {
+      userId: currentUser._id,
+      isOnline,
+    });
+    console.log("📡 Auto-sync user status to backend:", isOnline);
+  }
+}, [isOnline]);
+
+
 // ✅ FIXED: Toggle with immediate socket emit
 const handleOnlineToggle = (checked: boolean) => {
   if (!socket) {
@@ -233,6 +277,9 @@ const handleOnlineToggle = (checked: boolean) => {
     setIsOnline(false);
     return;
   }
+
+  
+
 
   // ✅ Mark that user manually toggled
   userManuallyToggled.current = true;
@@ -246,6 +293,9 @@ const handleOnlineToggle = (checked: boolean) => {
     userId: currentUser?._id,
     isOnline: checked,
   });
+    // ✅ Save user’s chosen state to persist across refreshes
+  localStorage.setItem("isOnline", JSON.stringify(checked));
+
 
   if (checked) {
     toast({ title: "You're now Online" });
@@ -514,17 +564,21 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
                 </DropdownMenuItem>
 
                 <DropdownMenuItem
-                  onClick={() => {
-                    if (socket) {
-                      console.log("Disconnecting socket on logout...");
-                      socket.disconnect();
-                    }
-                    localStorage.clear();
-                    navigate("/");
-                  }}
-                >
-                  <LogOut className="mr-2 h-4 w-4" /> Logout
-                </DropdownMenuItem>
+  onClick={() => {
+    if (socket) {
+      console.log("Disconnecting socket on logout...");
+      socket.disconnect();
+    }
+    // ✅ Remove only login-related data and saved toggle state
+    localStorage.removeItem("userToken");
+    localStorage.removeItem("userId");
+    localStorage.removeItem("isOnline");
+    navigate("/");
+  }}
+>
+  <LogOut className="mr-2 h-4 w-4" /> Logout
+</DropdownMenuItem>
+
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

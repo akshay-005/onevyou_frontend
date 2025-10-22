@@ -3,7 +3,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { PhoneIncoming, PhoneOff } from "lucide-react";
 import { useSocket } from "@/utils/socket";
-
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 
@@ -15,6 +14,8 @@ interface IncomingCallModalProps {
     fromUserId?: string;
     callerId?: string;
     callerName?: string;
+    durationMin?: number; // ✅ Added
+    price?: number;
   } | null;
   onClose: () => void;
 }
@@ -56,13 +57,16 @@ const IncomingCallModal = ({ open, data, onClose }: IncomingCallModalProps) => {
     if (acceptedRef.current || !socket) return;
     acceptedRef.current = true;
 
+    // Stop ringtone
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
+      audioRef.current = null;
     }
 
     console.log("📞 Accepting call:", data);
 
+    // Notify backend
     socket.emit("call:response", {
       toUserId: data.fromUserId || data.callerId,
       accepted: true,
@@ -70,30 +74,47 @@ const IncomingCallModal = ({ open, data, onClose }: IncomingCallModalProps) => {
       callId: data.callId,
     });
 
-    // ✅ Notify both sides ready
-    socket.emit("call:ready", { channelName: data.channelName });
-
     toast({
       title: "✅ Call Accepted",
-      description: "Connecting you to the call...",
+      description: "Connecting...",
     });
 
     onClose();
-    navigate(`/call/${data.channelName}`);
+
+    // ✅ CRITICAL FIX: Include duration parameter
+    const duration = data.durationMin || 1;
+    const url = `/call/${data.channelName}?duration=${duration}`;
+    
+    console.log(`➡️ Navigating to ${url}`);
+    
+    setTimeout(() => {
+      navigate(url, {
+        state: {
+          callId: data.callId,
+          channelName: data.channelName,
+          fromUserId: data.fromUserId || data.callerId,
+          durationMin: duration,
+        },
+      });
+    }, 300);
   };
 
   const handleReject = () => {
     if (!socket) return;
     console.log("🚫 Rejecting call:", data);
 
+    // Stop ringtone
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
+      audioRef.current = null;
     }
 
+    // Notify backend
     socket.emit("call:response", {
       toUserId: data.fromUserId || data.callerId,
       accepted: false,
+      channelName: data.channelName,
       callId: data.callId,
     });
 
@@ -116,6 +137,11 @@ const IncomingCallModal = ({ open, data, onClose }: IncomingCallModalProps) => {
           <p className="text-muted-foreground text-sm">
             {data.callerName || "Someone"} is calling you...
           </p>
+          {data.durationMin && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Duration: {data.durationMin} minute{data.durationMin > 1 ? 's' : ''}
+            </p>
+          )}
         </DialogHeader>
 
         <div className="flex justify-center gap-6 mt-6">
