@@ -18,6 +18,8 @@ const CallRoom: React.FC = () => {
   const localAudioRef = useRef<ILocalAudioTrack | null>(null);
   const localVideoRef = useRef<ILocalVideoTrack | null>(null);
   const hasJoinedRef = useRef(false);
+  const cleanupDoneRef = useRef(false);
+  const autoEndTimerRef = useRef<number | null>(null);
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -146,11 +148,14 @@ const CallRoom: React.FC = () => {
 
         setJoined(true);
 
-        // Auto-end
+        // Auto-end after call duration
+        const autoEndMs = durationMin * 60 * 1000;
+        console.log(`⏰ Call will auto-end in ${durationMin} minutes (${autoEndMs}ms)`);
+        
         setTimeout(() => {
-          console.log("⏰ Time up");
+          console.log("⏰ Time up - ending call");
           cleanup();
-        }, durationMin * 60 * 1000);
+        }, autoEndMs);
 
         // Notify backend
         socket?.emit("call:start", { channelName, userId: localStorage.getItem("userId") });
