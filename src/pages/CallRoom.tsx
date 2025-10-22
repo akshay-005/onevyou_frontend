@@ -106,10 +106,7 @@ unlockMedia();
   }
 }
 
-          audio = await AgoraRTC.createMicrophoneAudioTrack();
-          video = null as any;
-          toast({ title: "Camera unavailable", variant: "destructive" });
-        }
+          
 
         localAudioRef.current = audio;
         localVideoRef.current = video;
