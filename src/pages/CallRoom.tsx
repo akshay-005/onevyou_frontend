@@ -51,8 +51,6 @@ const CallRoom: React.FC = () => {
     if (!channelName || hasJoinedRef.current) return;
     hasJoinedRef.current = true;
 
-    let cleanupDone = false;
-
     const init = async () => {
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "h264" });
       clientRef.current = client;
@@ -135,7 +133,9 @@ const CallRoom: React.FC = () => {
 
         client.on("connection-state-change", (cur, prev) => {
           console.log(`${prev} → ${cur}`);
-          if (cur === "DISCONNECTED" && prev !== "DISCONNECTING") {
+          // Only cleanup if disconnected unexpectedly (not by us)
+          if (cur === "DISCONNECTED" && prev === "CONNECTED" && !cleanupDoneRef.current) {
+            console.warn("⚠️ Unexpected disconnect!");
             cleanup();
           }
         });
@@ -152,7 +152,7 @@ const CallRoom: React.FC = () => {
         const autoEndMs = durationMin * 60 * 1000;
         console.log(`⏰ Call will auto-end in ${durationMin} minutes (${autoEndMs}ms)`);
         
-        setTimeout(() => {
+        autoEndTimerRef.current = window.setTimeout(() => {
           console.log("⏰ Time up - ending call");
           cleanup();
         }, autoEndMs);
@@ -168,10 +168,22 @@ const CallRoom: React.FC = () => {
     };
 
     const cleanup = async () => {
-      if (cleanupDone) return;
-      cleanupDone = true;
+      if (cleanupDoneRef.current) {
+        console.log("⚠️ Cleanup already done, skipping");
+        return;
+      }
+      cleanupDoneRef.current = true;
+      console.log("🧹 Starting cleanup");
 
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+
+      if (autoEndTimerRef.current) {
+        clearTimeout(autoEndTimerRef.current);
+        autoEndTimerRef.current = null;
+      }
 
       const elapsed = startTimeRef.current > 0 
         ? Math.floor((Date.now() - startTimeRef.current) / 1000) 
@@ -196,6 +208,7 @@ const CallRoom: React.FC = () => {
         localVideoRef.current = null;
       }
 
+      console.log("✅ Cleanup complete");
       toast({ title: "Call ended" });
       navigate("/dashboard");
     };
@@ -206,8 +219,11 @@ const CallRoom: React.FC = () => {
     socket?.on("call:ended", handleCallEnded);
 
     return () => {
+      console.log("🔄 Component unmounting");
       socket?.off("call:ended", handleCallEnded);
-      cleanup();
+      if (!cleanupDoneRef.current) {
+        cleanup();
+      }
     };
   }, [channelName]);
 
@@ -278,8 +294,13 @@ const CallRoom: React.FC = () => {
           </button>
           <button
             onClick={() => {
+              console.log("🔴 Leave button clicked");
               if (timerRef.current) clearInterval(timerRef.current);
-              navigate("/dashboard");
+              if (autoEndTimerRef.current) clearTimeout(autoEndTimerRef.current);
+              if (!cleanupDoneRef.current) {
+                cleanupDoneRef.current = true;
+                navigate("/dashboard");
+              }
             }}
             className="p-4 rounded-full bg-red-600"
           >
