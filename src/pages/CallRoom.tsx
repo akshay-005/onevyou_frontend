@@ -198,10 +198,12 @@ setTimeout(() => tryPlay(), 700);
         const autoEndMs = durationMin * 60 * 1000;
         console.log(`⏰ Call will auto-end in ${durationMin} minutes (${autoEndMs}ms)`);
         
-        autoEndTimerRef.current = window.setTimeout(() => {
-          console.log("⏰ Time up - ending call");
-          cleanup();
-        }, autoEndMs);
+        const bufferMs = 3000; // 3-second buffer for full minute experience
+autoEndTimerRef.current = window.setTimeout(() => {
+  console.log("⏰ Time up - ending call (with buffer)");
+  cleanup();
+}, autoEndMs + bufferMs);
+
 
         // Notify backend
         safeEmit("call:start", { channelName, userId: localStorage.getItem("userId") });
