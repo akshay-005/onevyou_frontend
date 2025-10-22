@@ -172,6 +172,10 @@ const CallRoom: React.FC = () => {
         console.log("⚠️ Cleanup already done, skipping");
         return;
       }
+      
+      // Debug: Log stack trace to see WHO called cleanup
+      console.trace("🧹 Cleanup called from:");
+      
       cleanupDoneRef.current = true;
       console.log("🧹 Starting cleanup");
 
