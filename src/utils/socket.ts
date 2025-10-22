@@ -1,4 +1,3 @@
-// frontend/src/utils/socket.ts
 import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { io, Socket } from "socket.io-client";
 
@@ -7,7 +6,15 @@ import { io, Socket } from "socket.io-client";
 // ================================
 let socketInstance: Socket | null = null;
 
-export const safeEmit = (event: string, data?: any) => {
+/**
+ * Safe emit that retries once if socket isn't ready.
+ * 🧠 Enhancement: automatically injects socket.myUserId (if available)
+ */
+export const safeEmit = (event: string, data: any = {}) => {
+  if (socketInstance && (socketInstance as any).myUserId) {
+    data.userId = data.userId || (socketInstance as any).myUserId;
+  }
+
   if (socketInstance && socketInstance.connected) {
     socketInstance.emit(event, data);
   } else {
@@ -23,7 +30,6 @@ export const safeEmit = (event: string, data?: any) => {
   }
 };
 
-
 // Create Socket context
 const SocketContext = createContext<Socket | null>(null);
 
@@ -33,8 +39,6 @@ interface ProviderProps {
 
 export const SocketProvider = ({ children }: ProviderProps) => {
   const [socket, setSocket] = useState<Socket | null>(null);
-
-  
 
   useEffect(() => {
     const token = localStorage.getItem("userToken");
@@ -53,8 +57,8 @@ export const SocketProvider = ({ children }: ProviderProps) => {
     console.log("🔌 Connecting to Socket.IO server:", baseURL);
 
     // ✅ Prevent duplicate connections
-    if (socket) {
-      console.log("⚙️ Socket already exists, skipping reinit");
+    if (socketInstance) {
+      console.log("⚙️ Socket already connected, skipping new init");
       return;
     }
 
@@ -70,58 +74,73 @@ export const SocketProvider = ({ children }: ProviderProps) => {
       reconnectionAttempts: 10,
     });
 
-    socketInstance = s; 
+    // 🆕 Attach userId immediately
+    const storedUserId = localStorage.getItem("userId");
+    if (storedUserId) {
+      (s as any).myUserId = storedUserId;
+      console.log("🧠 Loaded myUserId into socket:", storedUserId);
+    } else {
+      console.warn("⚠️ No userId found in localStorage yet — will attach later");
+    }
 
-// ✅ Auto-resync user online status after reconnection
-s.on("connect", () => {
-  console.log("🔌 Socket reconnected successfully:", s.id);
-  const userId = localStorage.getItem("userId");
+    socketInstance = s;
 
-  // 🧠 Read saved state from localStorage (default true)
-  const savedOnlineState = localStorage.getItem("isOnline");
-  const isOnline = savedOnlineState ? JSON.parse(savedOnlineState) : true;
-
-  if (userId) {
-    safeEmit("user:status:update", { userId, isOnline });
-  }
-
-  console.log(`🔄 Restored online state: ${isOnline}`);
-});
-
-
-
-// ✅ BONUS: Notify when socket automatically reconnects after a temporary drop
-s.on("reconnect", (attemptNumber) => {
-  console.log(`♻️ Socket reconnected after drop (attempt ${attemptNumber})`);
-  // Optional visual feedback — you can remove if not needed
-  if (typeof window !== "undefined") {
-    const event = new CustomEvent("app-toast", {
-      detail: {
-        title: "Reconnected",
-        description: "Connection restored automatically",
-      },
+    // 🆕 Dynamically attach userId later if login happens after socket init
+    window.addEventListener("storage", () => {
+      const newId = localStorage.getItem("userId");
+      if (newId && socketInstance && !(socketInstance as any).myUserId) {
+        (socketInstance as any).myUserId = newId;
+        console.log("🧩 userId attached dynamically:", newId);
+      }
     });
-    window.dispatchEvent(event);
-  }
-});
 
+    // 🧩 Handle successful connection or reconnection
+    s.on("connect", () => {
+      console.log("✅ Socket connected:", s.id);
 
+      // Ensure userId exists
+      const userId = (s as any).myUserId || localStorage.getItem("userId");
+      if (userId) (s as any).myUserId = userId;
 
+      // Restore last known online state
+      const savedOnlineState = localStorage.getItem("isOnline");
+      const isOnline = savedOnlineState ? JSON.parse(savedOnlineState) : true;
 
-    s.on("connect", () => console.log("✅ Socket connected:", s.id));
+      if (userId) {
+        safeEmit("user:status:update", { userId, isOnline });
+        console.log("🔄 Restored online state:", isOnline);
+      } else {
+        console.warn("⚠️ Still missing userId — cannot emit status update");
+      }
+    });
+
+    // ✅ Notify when socket automatically reconnects
+    s.on("reconnect", (attemptNumber) => {
+      console.log(`♻️ Socket reconnected after drop (attempt ${attemptNumber})`);
+      if (typeof window !== "undefined") {
+        const event = new CustomEvent("app-toast", {
+          detail: {
+            title: "Reconnected",
+            description: "Connection restored automatically",
+          },
+        });
+        window.dispatchEvent(event);
+      }
+    });
+
+    // ⚙️ Generic listeners
     s.on("disconnect", (reason) => console.log("⚠️ Socket disconnected:", reason));
     s.on("connect_error", (err) => console.error("🚫 Socket connect_error:", err.message || err));
 
     setSocket(s);
 
-    // ✅ Cleanup when provider unmounts or token changes
+    // ✅ Cleanup (keep socket alive globally)
     return () => {
-  console.log("🧹 Cleaning up Socket.IO listeners (NOT disconnecting)");
-  s.removeAllListeners();     // remove old listeners
-  // ❌ don't disconnect socket here, keep it alive
-  socketInstance = s;         // keep global instance alive
-};
-  }, []); // ✅ Run only once on moun
+      console.log("🧹 Cleaning up Socket.IO listeners (NOT disconnecting)");
+      s.removeAllListeners();
+      socketInstance = s;
+    };
+  }, []); // ✅ Run only once
 
   // ✅ Provide socket to all components
   return React.createElement(SocketContext.Provider, { value: socket }, children);
