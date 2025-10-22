@@ -50,6 +50,7 @@ const CallRoom: React.FC = () => {
   };
 
   useEffect(() => {
+    
     if (!channelName || hasJoinedRef.current) return;
     hasJoinedRef.current = true;
 
@@ -70,7 +71,7 @@ const unlockMedia = () => {
     console.warn("Media unlock error:", err);
   }
 };
-unlockMedia();
+unlockMedia(); 
 
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "h264" });
       clientRef.current = client;
@@ -206,7 +207,20 @@ autoEndTimerRef.current = window.setTimeout(() => {
 
 
         // Notify backend
-        safeEmit("call:start", { channelName, userId: localStorage.getItem("userId") });
+        const userId = localStorage.getItem("userId");
+if (!userId) {
+  console.warn("⚠️ No userId found in localStorage, delaying call:start emit");
+  setTimeout(() => {
+    const retryUserId = localStorage.getItem("userId");
+    if (retryUserId) {
+      safeEmit("call:start", { channelName, userId: retryUserId });
+      console.log("✅ Retried call:start emit with userId", retryUserId);
+    }
+  }, 1000);
+} else {
+  safeEmit("call:start", { channelName, userId });
+}
+
 
       } catch (err: any) {
         console.error("Init error:", err);
