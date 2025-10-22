@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { storeUserSession } from "@/utils/storage";
+
 
 const API_BASE =
   import.meta.env.VITE_API_URL ||
@@ -32,8 +34,8 @@ const Login: React.FC = () => {
 
       if (data.success) {
         // ✅ Unified token key
-        localStorage.setItem("userToken", data.token);
-        localStorage.setItem("userData", JSON.stringify(data.user));
+        storeUserSession(data.user, data.token);
+
 
         if (data.user.profileComplete) navigate("/dashboard");
         else navigate("/profile-setup");

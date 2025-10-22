@@ -19,6 +19,8 @@ import {
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { io, Socket } from "socket.io-client";
+import { storeUserSession } from "@/utils/storage";
+
 
 type AuthMethod = "email" | "phone";
 type UserType = "fan" | "creator";
@@ -180,8 +182,8 @@ const Auth = () => {
         });
         const rdata = await rres.json();
         if (rres.ok && rdata.success) {
-          localStorage.setItem("userToken", rdata.token);
-          localStorage.setItem("userData", JSON.stringify(rdata.user));
+          storeUserSession(rdata.user, rdata.token);
+
           connectSocket(rdata.token);
           toast({ title: "Welcome!", description: "Account created successfully." });
           navigate("/profile-setup");
@@ -248,12 +250,13 @@ const Auth = () => {
         const rdata = await rres.json();
 
         if (rres.ok && rdata.success) {
-          localStorage.setItem("userToken", rdata.token);
-          localStorage.setItem("userData", JSON.stringify(rdata.user));
-          connectSocket(rdata.token);
-          toast({ title: "Welcome!", description: "Account created successfully." });
-          navigate("/profile-setup");
-        } else {
+  storeUserSession(rdata.user, rdata.token);
+  connectSocket(rdata.token);
+  toast({ title: "Welcome!", description: "Account created successfully." });
+  navigate("/profile-setup");
+}
+
+         else {
           toast({ title: "Registration failed", description: rdata.message || "Try again", variant: "destructive" });
         }
       } catch (err) {
@@ -291,11 +294,11 @@ const Auth = () => {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        localStorage.setItem("userToken", data.token);
-        localStorage.setItem("userData", JSON.stringify(data.user));
-        connectSocket(data.token);
-        toast({ title: "Logged in", description: `Welcome back, ${data.user.fullName}` });
-        navigate(data.user.profileComplete ? "/dashboard" : "/profile-setup");
+  storeUserSession(data.user, data.token);  // ✅ simplified helper
+  connectSocket(data.token);
+  toast({ title: "Logged in", description: `Welcome back, ${data.user.fullName}` });
+  navigate(data.user.profileComplete ? "/dashboard" : "/profile-setup");
+
       } else {
         toast({ title: "Login failed", description: data.message || "Invalid credentials", variant: "destructive" });
       }
