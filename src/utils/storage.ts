@@ -12,7 +12,8 @@ export const storeUserSession = (user: any, token: string) => {
   try {
     localStorage.setItem("userToken", token);
     localStorage.setItem("userData", JSON.stringify(user));
-    localStorage.setItem("userId", user._id);
+    localStorage.setItem("userId", user._id || user.id || "");
+
     
     // Set initial online state
     localStorage.setItem("isOnline", "true");

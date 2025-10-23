@@ -33,15 +33,15 @@ const Login: React.FC = () => {
       const data = await res.json();
 
       if (data.success) {
-        // ✅ Unified token key
-        storeUserSession(data.user, data.token);
+  // ✅ Use helper that saves both token & userId
+  storeUserSession(data.user, data.token);
 
+  if (data.user.profileComplete) navigate("/dashboard");
+  else navigate("/profile-setup");
+} else {
+  setError(data.message || "Login failed");
+}
 
-        if (data.user.profileComplete) navigate("/dashboard");
-        else navigate("/profile-setup");
-      } else {
-        setError(data.message || "Login failed");
-      }
     } catch (err) {
       console.error("Login error:", err);
       setError("Server error. Please try again later.");
