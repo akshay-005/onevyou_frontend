@@ -402,13 +402,15 @@ useEffect(() => {
 
   // ✅ Show different UI based on role before accepting
 if (role === "callee" && !accepted) {
-  return (
-    
-    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center">
+  const queryParams = new URLSearchParams(window.location.search);
+  const callId = queryParams.get("callId");
+  const callerId = queryParams.get("fromUserId"); // only if you pass it in link
 
+  return (
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center">
       <audio id="incomingTone" autoPlay loop>
-  <source src="/sounds/incoming.mp3" type="audio/mpeg" />
-</audio>
+        <source src="/sounds/incoming.mp3" type="audio/mpeg" />
+      </audio>
       <h2 className="text-2xl font-semibold mb-4">📞 Incoming Call</h2>
       <p className="text-gray-400 mb-6">Tap “Accept” to enable audio & video</p>
 
@@ -416,7 +418,12 @@ if (role === "callee" && !accepted) {
         <button
           onClick={() => {
             setAccepted(true);
-            safeEmit("call:accepted", { channelName }); // notify caller
+            safeEmit("call:response", {
+              toUserId: callerId, // notify the backend who the caller is
+              accepted: true,
+              callId,
+              channelName,
+            });
           }}
           className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-full text-white font-semibold shadow-lg"
         >
@@ -425,7 +432,12 @@ if (role === "callee" && !accepted) {
 
         <button
           onClick={() => {
-            safeEmit("call:rejected", { channelName });
+            safeEmit("call:response", {
+              toUserId: callerId,
+              accepted: false,
+              callId,
+              channelName,
+            });
             navigate("/dashboard");
           }}
           className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-lg"
@@ -436,6 +448,7 @@ if (role === "callee" && !accepted) {
     </div>
   );
 }
+
 
 // ✅ Caller waiting screen
 if (role === "caller" && !accepted) {

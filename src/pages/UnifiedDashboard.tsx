@@ -212,11 +212,23 @@ useEffect(() => {
   };
 
   const onIncoming = (payload: any) => {
-  console.log("📞 Incoming call from", payload.callerName);
+  console.log("📞 Incoming call from", payload.callerName, payload);
 
-  // Auto-navigate the callee to CallRoom with role=callee
-  navigate(`/call/${payload.channelName}?role=callee&duration=${payload.durationMin || 1}`);
+  // 🧩 Play incoming ringtone
+  const audio = new Audio("/sounds/incoming.mp3");
+  audio.loop = true;
+  audio.play().catch(() => {});
+
+  // Option 1 — directly auto-navigate to CallRoom
+  navigate(
+    `/call/${payload.channelName}?role=callee&callId=${payload.callId}&fromUserId=${payload.fromUserId}&duration=${payload.durationMin || 1}`
+  );
+
+  // Option 2 (optional, if you use a modal):
+  // setIncomingCall(payload);
+  // setShowIncoming(true);
 };
+
 
 
   const onCallResponse = (payload: any) => {
