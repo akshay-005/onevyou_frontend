@@ -19,6 +19,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 // ✅ Import this
 import { SocketProvider } from "@/utils/socket";
+import "./utils/debugHelper";
 
 const queryClient = new QueryClient();
 

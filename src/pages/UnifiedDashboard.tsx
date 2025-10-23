@@ -60,6 +60,8 @@ import NotificationPanel from "@/components/NotificationPanel";
 import EarningsCard from "@/components/EarningsCard";
 import CallHistory from "@/components/CallHistory";
 import TeacherCard from "@/components/TeacherCard";
+import { clearUserSession } from "@/utils/storage";
+import { disconnectSocket } from "@/utils/socket";
 
 const UnifiedDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -580,15 +582,30 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
 
                 <DropdownMenuItem
   onClick={() => {
+    console.log("🚪 Logging out...");
+    
+    // 1. Disconnect socket first
     if (socket) {
-      console.log("Disconnecting socket on logout...");
-      socket.disconnect();
+      console.log("🔌 Disconnecting socket...");
+      disconnectSocket();
     }
-    // ✅ Remove only login-related data and saved toggle state
-    localStorage.removeItem("userToken");
-    localStorage.removeItem("userId");
-    localStorage.removeItem("isOnline");
-    navigate("/");
+    
+    // 2. Clear all session data
+    clearUserSession();
+    
+    // 3. Clear any other app-specific data
+    localStorage.removeItem("lastVisited");
+    
+    // 4. Show toast
+    toast({ 
+      title: "Logged Out", 
+      description: "You have been logged out successfully" 
+    });
+    
+    // 5. Redirect to home with slight delay for toast to show
+    setTimeout(() => {
+      navigate("/", { replace: true });
+    }, 500);
   }}
 >
   <LogOut className="mr-2 h-4 w-4" /> Logout

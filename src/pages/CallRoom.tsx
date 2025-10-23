@@ -1,26 +1,20 @@
-// frontend/src/pages/CallRoom.tsx - COMPLETELY REWRITTEN FOR RELIABILITY
+// frontend/src/pages/CallRoom.tsx - FIXED VERSION
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AgoraRTC, { IAgoraRTCClient, ILocalVideoTrack, ILocalAudioTrack } from "agora-rtc-sdk-ng";
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Maximize2 } from "lucide-react";
 import { useSocket, safeEmit } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 
-
-
 AgoraRTC.setLogLevel(3);
 
-  const CallRoom: React.FC = () => {
+const CallRoom: React.FC = () => {
   const { channelName } = useParams();
-  // Detect whether user is caller or callee
-const role = new URLSearchParams(window.location.search).get("role") || "caller";
-
+  const role = new URLSearchParams(window.location.search).get("role") || "caller";
   const navigate = useNavigate();
   const { toast } = useToast();
   const socket = useSocket();
-  const [accepted, setAccepted] = useState(false);
-
 
   const clientRef = useRef<IAgoraRTCClient | null>(null);
   const localAudioRef = useRef<ILocalAudioTrack | null>(null);
@@ -28,6 +22,7 @@ const role = new URLSearchParams(window.location.search).get("role") || "caller"
   const hasJoinedRef = useRef(false);
   const cleanupDoneRef = useRef(false);
   const autoEndTimerRef = useRef<number | null>(null);
+  const isCleaningUpRef = useRef(false);
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -35,6 +30,8 @@ const role = new URLSearchParams(window.location.search).get("role") || "caller"
   const [durationSec, setDurationSec] = useState(0);
   const [joined, setJoined] = useState(false);
   const [isSwapped, setIsSwapped] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
   const timerRef = useRef<number | null>(null);
@@ -42,149 +39,240 @@ const role = new URLSearchParams(window.location.search).get("role") || "caller"
 
   const query = new URLSearchParams(window.location.search);
   const durationMin = Number(query.get("duration")) || 1;
-  const [isConnecting, setIsConnecting] = useState(false);
-  
 
-
-  // Safe play helper
-  const safePlay = (track: any, elementId?: string) => {
+  // Safe play helper with better error handling
+  const safePlay = async (track: any, elementId?: string) => {
+    if (!track) return;
+    
     try {
-      const result = elementId ? track?.play(elementId) : track?.play();
+      const result = elementId ? track.play(elementId) : track.play();
       if (result && typeof result.catch === 'function') {
-        result.catch((e: any) => console.warn("Play failed:", e));
+        await result.catch((e: any) => {
+          console.warn("Play warning (non-critical):", e?.message || e);
+        });
       }
-    } catch (e) {
-      console.warn("Play error:", e);
+    } catch (e: any) {
+      console.warn("Play error (non-critical):", e?.message || e);
     }
   };
 
-  useEffect(() => {
-  // 🧠 Only start Agora when user clicked “Accept”
-  if (!accepted || !channelName || hasJoinedRef.current) return;
+  // Cleanup function with proper guards
+  const cleanup = async () => {
+    // Prevent multiple simultaneous cleanups
+    if (isCleaningUpRef.current) {
+      console.log("⚠️ Cleanup already in progress, skipping");
+      return;
+    }
 
-  hasJoinedRef.current = true;
+    if (cleanupDoneRef.current) {
+      console.log("⚠️ Cleanup already completed, skipping");
+      return;
+    }
 
-  const init = async () => {
-    // 🔓 Fully unlock mic and camera before joining
-    const unlockMedia = async () => {
+    isCleaningUpRef.current = true;
+    console.log("🧹 Starting cleanup");
+
+    // Clear timers
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    if (autoEndTimerRef.current) {
+      clearTimeout(autoEndTimerRef.current);
+      autoEndTimerRef.current = null;
+    }
+
+    // Calculate elapsed time
+    const elapsed = startTimeRef.current > 0 
+      ? Math.floor((Date.now() - startTimeRef.current) / 1000)
+      : 0;
+
+    // Notify backend about call end
+    const userId = localStorage.getItem("userId");
+    if (userId && channelName) {
+      safeEmit("call:end", { channelName, durationSec: elapsed, userId });
+    }
+
+    // Stop all audio playback
+    const audioElements = document.querySelectorAll("audio");
+    audioElements.forEach(audio => {
+      audio.pause();
+      audio.src = "";
+    });
+
+    // Clean up Agora client
+    const client = clientRef.current;
+    if (client) {
       try {
-        console.log("🔓 Requesting audio/video permission...");
-        const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-        tempStream.getTracks().forEach(track => track.stop());
-        console.log("✅ Media unlocked (mic + cam permissions granted)");
+        // Unpublish tracks first
+        if (localAudioRef.current || localVideoRef.current) {
+          const tracks = [localAudioRef.current, localVideoRef.current].filter(Boolean);
+          if (tracks.length > 0) {
+            await client.unpublish(tracks as any).catch(() => {});
+          }
+        }
+
+        // Leave channel
+        await client.leave().catch(() => {});
+        
+        // Remove all listeners
+        client.removeAllListeners();
       } catch (err) {
-        console.warn("⚠️ Media unlock failed:", err);
+        console.warn("Client cleanup error (non-critical):", err);
       }
-    };
-    await unlockMedia();
+    }
 
-
-
-      const client = AgoraRTC.createClient({ mode: "rtc", codec: "h264" });
-      clientRef.current = client;
-
+    // Close local tracks
+    if (localAudioRef.current) {
       try {
-        // Get token
-        const res = await fetch(`${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`);
+        localAudioRef.current.close();
+      } catch (e) {
+        console.warn("Audio track close error:", e);
+      }
+      localAudioRef.current = null;
+    }
+
+    if (localVideoRef.current) {
+      try {
+        localVideoRef.current.close();
+      } catch (e) {
+        console.warn("Video track close error:", e);
+      }
+      localVideoRef.current = null;
+    }
+
+    // Mark cleanup as done
+    cleanupDoneRef.current = true;
+    isCleaningUpRef.current = false;
+    
+    console.log("✅ Cleanup complete");
+    
+    toast({ title: "Call ended", description: `Duration: ${Math.floor(elapsed / 60)}m ${elapsed % 60}s` });
+    
+    // Small delay before navigation to ensure cleanup completes
+    setTimeout(() => navigate("/dashboard"), 300);
+  };
+
+  // Main call initialization
+  useEffect(() => {
+    if (!accepted || !channelName || hasJoinedRef.current) return;
+
+    hasJoinedRef.current = true;
+    let mounted = true;
+
+    const init = async () => {
+      try {
+        // Request permissions first
+        console.log("🔓 Requesting permissions...");
+        const tempStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: true, 
+          video: true 
+        });
+        tempStream.getTracks().forEach(track => track.stop());
+        console.log("✅ Permissions granted");
+
+        if (!mounted) return;
+
+        // Create Agora client
+        const client = AgoraRTC.createClient({ mode: "rtc", codec: "h264" });
+        clientRef.current = client;
+
+        // Get token from backend
+        const res = await fetch(
+          `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
+        );
         const data = await res.json();
-        if (!data.success) throw new Error("Token failed");
+        
+        if (!data.success) {
+          throw new Error(data.message || "Failed to get token");
+        }
 
-        // Join
+        if (!mounted) return;
+
+        console.log("🔗 Joining channel...");
         await client.join(data.appId, channelName, data.token, data.uid);
-        console.log("✅ Joined");
+        console.log("✅ Joined channel");
 
-        // Create tracks
-        let audio: ILocalAudioTrack, video: ILocalVideoTrack;
+        if (!mounted) return;
+
+        // Create audio and video tracks
+        console.log("🎥 Creating media tracks...");
+        let audio: ILocalAudioTrack;
+        let video: ILocalVideoTrack | null = null;
+
         try {
-  [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
-    { AEC: true, AGC: true, ANS: true },
-    { encoderConfig: "480p_1" }
-  );
-} catch (err) {
-  console.warn("🎙️ Initial camera track creation failed, retrying once...", err);
-  await new Promise(r => setTimeout(r, 1000));
-  try {
-    [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
-      { AEC: true, AGC: true, ANS: true },
-      { encoderConfig: "480p_1" }
-    );
-  } catch (retryErr) {
-    console.error("🚫 Second track creation failed:", retryErr);
-    audio = await AgoraRTC.createMicrophoneAudioTrack();
-    video = null as any;
-    toast({ title: "Camera unavailable", description: "Audio-only mode", variant: "destructive" });
-  }
-}
+          [audio, video] = await AgoraRTC.createMicrophoneAndCameraTracks(
+            { 
+              AEC: true, 
+              AGC: true, 
+              ANS: true 
+            },
+            { 
+              encoderConfig: "480p_1",
+              optimizationMode: "detail"
+            }
+          );
+        } catch (err) {
+          console.warn("Camera failed, trying audio only:", err);
+          audio = await AgoraRTC.createMicrophoneAudioTrack({
+            AEC: true,
+            AGC: true,
+            ANS: true
+          });
+          toast({ 
+            title: "Camera unavailable", 
+            description: "Continuing with audio only",
+            variant: "destructive" 
+          });
+        }
 
-          
+        if (!mounted) return;
 
         localAudioRef.current = audio;
         localVideoRef.current = video;
 
-        // Play local
-        if (video) safePlay(video, "local-player");
+        // Play local video
+        if (video) {
+          await safePlay(video, "local-player");
+        }
 
-        // Publish
-        await client.publish(video ? [audio, video] : [audio]);
-        console.log("✅ Published");
+        // Publish to channel
+        const tracksToPublish = video ? [audio, video] : [audio];
+        console.log("📤 Publishing tracks...");
+        await client.publish(tracksToPublish as any);
+        console.log("✅ Published successfully");
 
-        // 🧩 Mobile audio unlock fallback (for Safari/Chrome mobile)
-document.addEventListener("click", () => {
-  if (localAudioRef.current) {
-    try {
-      localAudioRef.current.play?.().catch(() => {});
-      console.log("🎧 Manual audio play triggered on user interaction");
-    } catch (err) {
-      console.warn("Audio play error:", err);
-    }
-  }
-}, { once: true });
-
+        if (!mounted) return;
 
         // Handle remote users
         client.on("user-published", async (user, mediaType) => {
-          console.log(`📥 ${user.uid} published ${mediaType}`);
+          console.log(`📥 Remote user ${user.uid} published ${mediaType}`);
           
           try {
             await client.subscribe(user, mediaType);
             
             if (mediaType === "video") {
-              const container = document.getElementById("remote-player");
-              if (container) {
-                let playerDiv = document.getElementById(`player-${user.uid}`);
-                if (!playerDiv) {
-                  playerDiv = document.createElement("div");
-                  playerDiv.id = `player-${user.uid}`;
-                  playerDiv.className = "w-full h-full";
-                  container.appendChild(playerDiv);
+              setTimeout(async () => {
+                const container = document.getElementById("remote-player");
+                if (container && user.videoTrack) {
+                  let playerDiv = document.getElementById(`player-${user.uid}`);
+                  if (!playerDiv) {
+                    playerDiv = document.createElement("div");
+                    playerDiv.id = `player-${user.uid}`;
+                    playerDiv.className = "w-full h-full";
+                    container.appendChild(playerDiv);
+                  }
+                  await safePlay(user.videoTrack, `player-${user.uid}`);
+                  console.log(`🎥 Playing remote video for ${user.uid}`);
                 }
-                const tryPlay = (attempt = 1) => {
-  try {
-    user.videoTrack?.play(`player-${user.uid}`);
-    console.log(`🎥 Remote video playing for ${user.uid}`);
-  } catch (err) {
-    if (attempt < 4) {
-      console.warn(`Video play failed (attempt ${attempt})`, err);
-      setTimeout(() => tryPlay(attempt + 1), 400 * attempt);
-    } else {
-      console.error("❌ Video failed to play after retries", err);
-    }
-  }
-};
-setTimeout(() => tryPlay(), 700);
-
-              }
+              }, 500);
             }
             
-            if (mediaType === "audio") {
-  if (user.audioTrack) {
-    console.log(`🎧 Playing remote audio for ${user.uid}`);
-    safePlay(user.audioTrack);
-  } else {
-    console.warn("⚠️ No remote audio track found — possible permission issue");
-  }
-}
-
+            if (mediaType === "audio" && user.audioTrack) {
+              await safePlay(user.audioTrack);
+              console.log(`🎧 Playing remote audio for ${user.uid}`);
+            }
 
             setRemoteUsers(prev => {
               if (prev.find(u => u.uid === user.uid)) return prev;
@@ -195,25 +283,30 @@ setTimeout(() => tryPlay(), 700);
           }
         });
 
-        client.on("user-unpublished", (user) => {
-          document.getElementById(`player-${user.uid}`)?.remove();
+        client.on("user-unpublished", (user, mediaType) => {
+          console.log(`📤 User ${user.uid} unpublished ${mediaType}`);
+          if (mediaType === "video") {
+            document.getElementById(`player-${user.uid}`)?.remove();
+          }
         });
 
         client.on("user-left", (user) => {
+          console.log(`👋 User ${user.uid} left`);
           document.getElementById(`player-${user.uid}`)?.remove();
           setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
         });
 
         client.on("connection-state-change", (cur, prev) => {
-          console.log(`${prev} → ${cur}`);
-          // Only cleanup if disconnected unexpectedly (not by us)
-          if (cur === "DISCONNECTED" && prev === "CONNECTED" && !cleanupDoneRef.current) {
-            console.warn("⚠️ Unexpected disconnect!");
+          console.log(`Connection: ${prev} → ${cur}`);
+          if (cur === "DISCONNECTED" && !cleanupDoneRef.current) {
+            console.warn("⚠️ Unexpected disconnect");
             cleanup();
           }
         });
 
-        // Start timer
+        if (!mounted) return;
+
+        // Start call timer
         startTimeRef.current = Date.now();
         timerRef.current = window.setInterval(() => {
           setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
@@ -221,165 +314,93 @@ setTimeout(() => tryPlay(), 700);
 
         setJoined(true);
 
-        // Auto-end after call duration
-        const autoEndMs = durationMin * 60 * 1000;
-        console.log(`⏰ Call will auto-end in ${durationMin} minutes (${autoEndMs}ms)`);
-        
-        const bufferMs = 3000; // 3-second buffer for full minute experience
-autoEndTimerRef.current = window.setTimeout(() => {
-  console.log("⏰ Time up - ending call (with buffer)");
-  cleanup();
-}, autoEndMs + bufferMs);
-
+        // Auto-end timer
+        const autoEndMs = durationMin * 60 * 1000 + 3000;
+        console.log(`⏰ Auto-end scheduled in ${durationMin}min`);
+        autoEndTimerRef.current = window.setTimeout(() => {
+          console.log("⏰ Call duration reached, ending...");
+          cleanup();
+        }, autoEndMs);
 
         // Notify backend
         const userId = localStorage.getItem("userId");
-if (!userId) {
-  console.warn("⚠️ No userId found in localStorage, delaying call:start emit");
-  setTimeout(() => {
-    const retryUserId = localStorage.getItem("userId");
-    if (retryUserId) {
-      safeEmit("call:start", { channelName, userId: retryUserId });
-      console.log("✅ Retried call:start emit with userId", retryUserId);
-    }
-  }, 1000);
-} else {
-  safeEmit("call:start", { channelName, userId });
-}
-
+        if (userId) {
+          safeEmit("call:start", { channelName, userId });
+        }
 
       } catch (err: any) {
-        console.error("Init error:", err);
-        toast({ title: "Call Failed", description: err.message, variant: "destructive" });
+        console.error("❌ Call initialization failed:", err);
+        toast({ 
+          title: "Call Failed", 
+          description: err.message || "Unable to start call",
+          variant: "destructive" 
+        });
         cleanup();
       }
     };
 
-    const cleanup = async () => {
-  if (cleanupDoneRef.current) {
-    console.log("⚠️ Cleanup already done, skipping");
-    return;
-  }
-
-  // Debug: Log stack trace to see WHO called cleanup
-  console.trace("🧹 Cleanup called from:");
-
-  cleanupDoneRef.current = true;
-  console.log("🧹 Starting cleanup");
-
-  if (timerRef.current) {
-    clearInterval(timerRef.current);
-    timerRef.current = null;
-  }
-
-  if (autoEndTimerRef.current) {
-    clearTimeout(autoEndTimerRef.current);
-    autoEndTimerRef.current = null;
-  }
-
-  const elapsed =
-    startTimeRef.current > 0
-      ? Math.floor((Date.now() - startTimeRef.current) / 1000)
-      : 0;
-
-  safeEmit("call:end", { channelName, durationSec: elapsed });
-
-  const client = clientRef.current;
-  if (client) {
-    try {
-      await client.unpublish();
-    } catch (err) {
-      console.warn("Unpublish failed:", err);
-    }
-
-    try {
-      await client.leave();
-      client.removeAllListeners();
-    } catch {}
-  }
-
-  if (localAudioRef.current) {
-    localAudioRef.current.close();
-    localAudioRef.current = null;
-  }
-
-  if (localVideoRef.current) {
-    localVideoRef.current.close();
-    localVideoRef.current = null;
-  }
-
-  console.log("✅ Cleanup complete");
-  toast({ title: "Call ended" });
-  navigate("/dashboard");
-
-  // ✅ Reset refs for next session (keep this inside cleanup)
-  hasJoinedRef.current = false;
-  cleanupDoneRef.current = false;
-  clientRef.current = null;
-  localAudioRef.current = null;
-  localVideoRef.current = null;
-};
-
-
-
     init();
 
-    const handleCallEnded = () => cleanup();
+    // Socket event handlers
+    const handleCallEnded = () => {
+      console.log("📞 Call ended by server");
+      cleanup();
+    };
+
     socket?.on("call:ended", handleCallEnded);
 
+    // Cleanup on unmount
     return () => {
-      console.log("🔄 Component unmounting");
+      mounted = false;
       socket?.off("call:ended", handleCallEnded);
-      if (!cleanupDoneRef.current) {
+      if (!cleanupDoneRef.current && !isCleaningUpRef.current) {
         cleanup();
       }
     };
   }, [accepted, channelName]);
 
-  // 🔄 Socket communication between caller & callee
-useEffect(() => {
-  if (!socket) return;
+  // Socket communication for call acceptance
+  useEffect(() => {
+    if (!socket) return;
 
-  // When callee accepts
-  socket.on("call:accepted", () => {
-  console.log("✅ Callee accepted — joining room now...");
-  const ring = document.getElementById("ringtone") as HTMLAudioElement;
-  if (ring) ring.pause();
+    const handleAccepted = () => {
+      console.log("✅ Call accepted");
+      const ring = document.getElementById("ringtone") as HTMLAudioElement;
+      if (ring) {
+        ring.pause();
+        ring.src = "";
+      }
+      setIsConnecting(true);
+      setTimeout(() => {
+        setIsConnecting(false);
+        setAccepted(true);
+      }, 1500);
+    };
 
-  // 🔄 Show connecting overlay
-  setIsConnecting(true);
+    const handleRejected = () => {
+      console.log("❌ Call rejected");
+      toast({ title: "Call Declined", description: "The user declined your call" });
+      navigate("/dashboard");
+    };
 
-  // Wait 1.5s for smoother transition, then join
-  setTimeout(() => {
-    setIsConnecting(false);
-    setAccepted(true);
-  }, 1500);
-});
+    const handleCancelled = () => {
+      console.log("🚫 Call cancelled");
+      toast({ title: "Call Cancelled" });
+      navigate("/dashboard");
+    };
 
+    socket.on("call:accepted", handleAccepted);
+    socket.on("call:rejected", handleRejected);
+    socket.on("call:cancelled", handleCancelled);
 
-  // When callee rejects
-  socket.on("call:rejected", () => {
-    console.log("❌ Callee rejected the call");
-    toast({ title: "Call rejected" });
-    navigate("/dashboard");
-  });
+    return () => {
+      socket.off("call:accepted", handleAccepted);
+      socket.off("call:rejected", handleRejected);
+      socket.off("call:cancelled", handleCancelled);
+    };
+  }, [socket, navigate]);
 
-  // When caller cancels
-  socket.on("call:cancelled", () => {
-    console.log("☎️ Caller cancelled the call");
-    toast({ title: "Call cancelled" });
-    navigate("/dashboard");
-  });
-
-  return () => {
-    socket.off("call:accepted");
-    socket.off("call:rejected");
-    socket.off("call:cancelled");
-  };
-}, [socket]);
-
-
-
+  // Control functions
   const toggleMic = async () => {
     if (localAudioRef.current) {
       await localAudioRef.current.setEnabled(!isMicOn);
@@ -400,167 +421,218 @@ useEffect(() => {
     return `${m}:${s}`;
   };
 
-  // ✅ Show different UI based on role before accepting
-if (role === "callee" && !accepted) {
-  const queryParams = new URLSearchParams(window.location.search);
-  const callId = queryParams.get("callId");
-  const callerId = queryParams.get("fromUserId"); // only if you pass it in link
+  // UI States
+  if (role === "callee" && !accepted) {
+    const callId = query.get("callId");
+    const callerId = query.get("fromUserId");
 
-  return (
-    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center">
-      <audio id="incomingTone" autoPlay loop>
-        <source src="/sounds/incoming.mp3" type="audio/mpeg" />
-      </audio>
-      <h2 className="text-2xl font-semibold mb-4">📞 Incoming Call</h2>
-      <p className="text-gray-400 mb-6">Tap “Accept” to enable audio & video</p>
-
-      <div className="flex gap-6">
-        <button
-          onClick={() => {
-            setAccepted(true);
-            safeEmit("call:response", {
-              toUserId: callerId, // notify the backend who the caller is
-              accepted: true,
-              callId,
-              channelName,
-            });
-          }}
-          className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-full text-white font-semibold shadow-lg"
-        >
-          Accept
-        </button>
-
-        <button
-          onClick={() => {
-            safeEmit("call:response", {
-              toUserId: callerId,
-              accepted: false,
-              callId,
-              channelName,
-            });
-            navigate("/dashboard");
-          }}
-          className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-lg"
-        >
-          Decline
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
-// ✅ Caller waiting screen
-if (role === "caller" && !accepted) {
-  return (
-    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center">
-      <h2 className="text-2xl font-semibold mb-4">📞 Calling...</h2>
-      <p className="text-gray-400 mb-6">Waiting for other user to answer</p>
-
-      <audio id="ringtone" autoPlay loop>
-        <source src="/sounds/ringtone.mp3" type="audio/mpeg" />
-      </audio>
-
-      <button
-        onClick={() => {
-          const ring = document.getElementById("ringtone") as HTMLAudioElement;
-          if (ring) ring.pause();
-          safeEmit("call:cancelled", { channelName });
-          navigate("/dashboard");
-        }}
-        className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold"
-      >
-        Cancel Call
-      </button>
-    </div>
-  );
-}
-
-// 🌀 Show Connecting Overlay
-if (isConnecting) {
-  return (
-    <AnimatePresence>
-      <motion.div
-        key="connecting-overlay"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.6 }}
-        className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white text-center"
-
-      >
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white text-center px-4">
+        <audio id="incomingTone" autoPlay loop>
+          <source src="/sounds/incoming.mp3" type="audio/mpeg" />
+        </audio>
+        
         <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
-          className="w-12 h-12 border-4 border-t-transparent border-white rounded-full mb-6"
-        />
-        <h2 className="text-2xl font-semibold mb-2">🔗 Connecting...</h2>
-        <p className="text-gray-400 text-sm">Setting up your audio and video...</p>
-      </motion.div>
-    </AnimatePresence>
-  );
-}
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="space-y-6"
+        >
+          <div className="w-24 h-24 mx-auto bg-green-500/20 rounded-full flex items-center justify-center animate-pulse">
+            <PhoneOff className="w-12 h-12 text-green-500" />
+          </div>
+          
+          <h2 className="text-3xl font-bold">📞 Incoming Call</h2>
+          <p className="text-gray-400 max-w-sm">
+            Accept to enable your camera and microphone
+          </p>
 
+          <div className="flex gap-6 justify-center pt-4">
+            <button
+              onClick={() => {
+                const audio = document.getElementById("incomingTone") as HTMLAudioElement;
+                if (audio) {
+                  audio.pause();
+                  audio.src = "";
+                }
+                setAccepted(true);
+                safeEmit("call:response", {
+                  toUserId: callerId,
+                  accepted: true,
+                  callId,
+                  channelName,
+                });
+              }}
+              className="px-8 py-4 bg-green-600 hover:bg-green-700 rounded-full text-white font-semibold shadow-xl transform hover:scale-105 transition"
+            >
+              Accept Call
+            </button>
 
+            <button
+              onClick={() => {
+                const audio = document.getElementById("incomingTone") as HTMLAudioElement;
+                if (audio) {
+                  audio.pause();
+                  audio.src = "";
+                }
+                safeEmit("call:response", {
+                  toUserId: callerId,
+                  accepted: false,
+                  callId,
+                  channelName,
+                });
+                navigate("/dashboard");
+              }}
+              className="px-8 py-4 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-xl transform hover:scale-105 transition"
+            >
+              Decline
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
+  if (role === "caller" && !accepted) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white text-center px-4">
+        <audio id="ringtone" autoPlay loop>
+          <source src="/sounds/ringtone.mp3" type="audio/mpeg" />
+        </audio>
+
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="space-y-6"
+        >
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+            className="w-24 h-24 mx-auto border-4 border-t-transparent border-white rounded-full"
+          />
+          
+          <h2 className="text-3xl font-bold">📞 Calling...</h2>
+          <p className="text-gray-400 max-w-sm">
+            Waiting for the other person to answer
+          </p>
+
+          <button
+            onClick={() => {
+              const ring = document.getElementById("ringtone") as HTMLAudioElement;
+              if (ring) {
+                ring.pause();
+                ring.src = "";
+              }
+              safeEmit("call:cancelled", { channelName });
+              navigate("/dashboard");
+            }}
+            className="mt-8 px-8 py-4 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-xl transform hover:scale-105 transition"
+          >
+            Cancel Call
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (isConnecting) {
+    return (
+      <AnimatePresence>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white text-center"
+        >
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
+            className="w-16 h-16 border-4 border-t-transparent border-white rounded-full mb-6"
+          />
+          <h2 className="text-2xl font-semibold mb-2">🔗 Connecting...</h2>
+          <p className="text-gray-400 text-sm">Setting up your video call</p>
+        </motion.div>
+      </AnimatePresence>
+    );
+  }
+
+  // Active call UI
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col">
       <div className="flex-1 relative bg-black">
-        <div id={isSwapped ? "local-player" : "remote-player"} className="w-full h-full flex items-center justify-center">
+        <div 
+          id={isSwapped ? "local-player" : "remote-player"} 
+          className="w-full h-full flex items-center justify-center bg-gray-900"
+        >
           {!isSwapped && remoteUsers.length === 0 && (
-            <div className="text-center animate-pulse">
-              <div className="text-gray-400 text-lg mb-2">Waiting...</div>
-              <div className="text-gray-500 text-sm">{joined ? "Connected" : "Connecting..."}</div>
-            </div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center"
+            >
+              <motion.div
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="text-gray-400 text-xl mb-3"
+              >
+                Waiting for other person...
+              </motion.div>
+              <div className="text-gray-500 text-sm">
+                {joined ? "Connected to call" : "Connecting..."}
+              </div>
+            </motion.div>
           )}
         </div>
 
-        <div className="absolute top-4 left-4 bg-black/50 px-3 py-1.5 rounded-full flex items-center gap-2">
-          <Clock className="w-4 h-4" />
-          <span className="text-sm font-medium">{format(durationSec)}</span>
+        {/* Timer */}
+        <div className="absolute top-4 left-4 bg-black/70 backdrop-blur px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
+          <Clock className="w-5 h-5 text-green-400" />
+          <span className="text-lg font-mono font-semibold">{format(durationSec)}</span>
         </div>
 
-        <div className="absolute top-20 right-4 w-24 h-32 sm:w-32 sm:h-44 bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-gray-700">
-          <div id={isSwapped ? "remote-player" : "local-player"} className="w-full h-full" />
+        {/* Local video preview */}
+        <div className="absolute top-4 right-4 w-32 h-44 bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700">
+          <div 
+            id={isSwapped ? "remote-player" : "local-player"} 
+            className="w-full h-full"
+          />
           <button
             onClick={() => setIsSwapped(!isSwapped)}
-            className="absolute bottom-2 right-2 bg-black/70 p-1.5 rounded-full"
+            className="absolute bottom-2 right-2 bg-black/80 hover:bg-black p-2 rounded-full transition"
           >
-            <Maximize2 className="w-3 h-3" />
+            <Maximize2 className="w-4 h-4" />
           </button>
-          <div className="absolute top-1 left-1 bg-black/70 px-2 py-0.5 rounded text-xs">
+          <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-xs font-medium">
             {isSwapped ? "Remote" : "You"}
           </div>
         </div>
       </div>
 
-      <div className="bg-gray-800 border-t border-gray-700 p-4">
-        <div className="flex justify-center gap-4">
+      {/* Controls */}
+      <div className="bg-gray-800 border-t border-gray-700 p-6">
+        <div className="flex justify-center gap-6">
           <button
             onClick={toggleMic}
-            className={`p-4 rounded-full ${isMicOn ? "bg-gray-700" : "bg-red-600"}`}
+            className={`p-5 rounded-full transition-all transform hover:scale-110 shadow-lg ${
+              isMicOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
+            }`}
           >
-            {isMicOn ? <Mic className="w-6 h-6" /> : <MicOff className="w-6 h-6" />}
+            {isMicOn ? <Mic className="w-7 h-7" /> : <MicOff className="w-7 h-7" />}
           </button>
+          
           <button
             onClick={toggleCamera}
-            className={`p-4 rounded-full ${isCamOn ? "bg-gray-700" : "bg-red-600"}`}
+            className={`p-5 rounded-full transition-all transform hover:scale-110 shadow-lg ${
+              isCamOn ? "bg-gray-700 hover:bg-gray-600" : "bg-red-600 hover:bg-red-700"
+            }`}
           >
-            {isCamOn ? <Video className="w-6 h-6" /> : <VideoOff className="w-6 h-6" />}
+            {isCamOn ? <Video className="w-7 h-7" /> : <VideoOff className="w-7 h-7" />}
           </button>
+          
           <button
-            onClick={() => {
-              console.log("🔴 Leave button clicked");
-              if (timerRef.current) clearInterval(timerRef.current);
-              if (autoEndTimerRef.current) clearTimeout(autoEndTimerRef.current);
-              if (!cleanupDoneRef.current) {
-                cleanupDoneRef.current = true;
-                navigate("/dashboard");
-              }
-            }}
-            className="p-4 rounded-full bg-red-600"
+            onClick={cleanup}
+            className="p-5 rounded-full bg-red-600 hover:bg-red-700 transition-all transform hover:scale-110 shadow-lg"
           >
-            <PhoneOff className="w-6 h-6" />
+            <PhoneOff className="w-7 h-7" />
           </button>
         </div>
       </div>
