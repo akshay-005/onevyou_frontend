@@ -33,5 +33,24 @@ export const getOnlineUsers = async () =>
 export const getMe = async () =>
   fetchJSON(`${API_BASE}/api/users/me`, { headers: getAuthHeaders() });
 
-const api = { getOnlineUsers, getMe };
+
+
+// 🔹 Create Razorpay Order
+export const createOrder = async (amount) =>
+  fetchJSON(`${API_BASE}/api/payment/create-order`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ amount }),
+  });
+
+// 🔹 Verify Razorpay Payment
+export const verifyPayment = async (data) =>
+  fetchJSON(`${API_BASE}/api/payment/verify-payment`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+// ✅ Export everything
+const api = { getOnlineUsers, getMe, createOrder, verifyPayment };
 export default api;
