@@ -10,11 +10,13 @@ import { useToast } from "@/hooks/use-toast";
 
 AgoraRTC.setLogLevel(3);
 
-const CallRoom: React.FC = () => {
+  const CallRoom: React.FC = () => {
   const { channelName } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const socket = useSocket();
+  const [accepted, setAccepted] = useState(false);
+
 
   const clientRef = useRef<IAgoraRTCClient | null>(null);
   const localAudioRef = useRef<ILocalAudioTrack | null>(null);
@@ -50,23 +52,24 @@ const CallRoom: React.FC = () => {
   };
 
   useEffect(() => {
-    
-    if (!channelName || hasJoinedRef.current) return;
-    hasJoinedRef.current = true;
+  // 🧠 Only start Agora when user clicked “Accept”
+  if (!accepted || !channelName || hasJoinedRef.current) return;
 
-    const init = async () => {
-      // 🔓 Fully unlock mic and camera before joining
-const unlockMedia = async () => {
-  try {
-    console.log("🔓 Requesting audio/video permission...");
-    const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-    tempStream.getTracks().forEach(track => track.stop());
-    console.log("✅ Media unlocked (mic + cam permissions granted)");
-  } catch (err) {
-    console.warn("⚠️ Media unlock failed:", err);
-  }
-};
-await unlockMedia();
+  hasJoinedRef.current = true;
+
+  const init = async () => {
+    // 🔓 Fully unlock mic and camera before joining
+    const unlockMedia = async () => {
+      try {
+        console.log("🔓 Requesting audio/video permission...");
+        const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        tempStream.getTracks().forEach(track => track.stop());
+        console.log("✅ Media unlocked (mic + cam permissions granted)");
+      } catch (err) {
+        console.warn("⚠️ Media unlock failed:", err);
+      }
+    };
+    await unlockMedia();
 
 
 
@@ -324,7 +327,8 @@ if (!userId) {
         cleanup();
       }
     };
-  }, [channelName]);
+  }, [accepted, channelName]);
+
 
   const toggleMic = async () => {
     if (localAudioRef.current) {
@@ -345,6 +349,33 @@ if (!userId) {
     const s = (sec % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   };
+
+  if (!accepted) {
+  return (
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center animate-fade-in">
+      <h2 className="text-2xl font-semibold mb-2">📞 Incoming Call</h2>
+      <p className="text-gray-400 mb-6">Someone is calling you...</p>
+
+      <div className="flex gap-6">
+        <button
+          onClick={() => setAccepted(true)}
+          className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-full text-white font-semibold shadow-lg transition-transform hover:scale-105"
+        >
+          Accept
+        </button>
+
+        <button
+          onClick={() => navigate("/dashboard")}
+          className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-lg transition-transform hover:scale-105"
+        >
+          Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col">
