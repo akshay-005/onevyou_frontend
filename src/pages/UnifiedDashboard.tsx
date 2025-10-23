@@ -212,13 +212,12 @@ useEffect(() => {
   };
 
   const onIncoming = (payload: any) => {
-    setIncomingCall(payload);
-    setShowIncoming(true);
-    toast({
-      title: "Incoming Call",
-      description: `${payload.callerName || "Someone"} is calling you.`,
-    });
-  };
+  console.log("📞 Incoming call from", payload.callerName);
+
+  // Auto-navigate the callee to CallRoom with role=callee
+  navigate(`/call/${payload.channelName}?role=callee&duration=${payload.durationMin || 1}`);
+};
+
 
   const onCallResponse = (payload: any) => {
     if (payload.accepted && payload.channelName) {
@@ -338,10 +337,14 @@ const onPaymentComplete = (payload: {
     description: "Starting your video call...",
   });
 
-  socket.emit("call:request", { toUserId, channelName, price });
+  socket.emit("call:request", { toUserId, channelName, price, durationMin: payload.minutes });
 
-  setShowPricingModal(false);
-  setSelectedTeacher(null);
+// 🔹 Immediately open CallRoom as CALLER
+navigate(`/call/${channelName}?role=caller&duration=${payload.minutes}`);
+
+setShowPricingModal(false);
+setSelectedTeacher(null);
+
 };
 
 const openPricingForTeacher = (teacher: any) => {

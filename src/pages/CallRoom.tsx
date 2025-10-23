@@ -12,6 +12,9 @@ AgoraRTC.setLogLevel(3);
 
   const CallRoom: React.FC = () => {
   const { channelName } = useParams();
+  // Detect whether user is caller or callee
+const role = new URLSearchParams(window.location.search).get("role") || "caller";
+
   const navigate = useNavigate();
   const { toast } = useToast();
   const socket = useSocket();
@@ -329,6 +332,40 @@ if (!userId) {
     };
   }, [accepted, channelName]);
 
+  // 🔄 Socket communication between caller & callee
+useEffect(() => {
+  if (!socket) return;
+
+  // When callee accepts
+  socket.on("call:accepted", () => {
+    console.log("✅ Callee accepted — joining room now...");
+    setAccepted(true);
+    const ring = document.getElementById("ringtone") as HTMLAudioElement;
+    if (ring) ring.pause();
+  });
+
+  // When callee rejects
+  socket.on("call:rejected", () => {
+    console.log("❌ Callee rejected the call");
+    toast({ title: "Call rejected" });
+    navigate("/dashboard");
+  });
+
+  // When caller cancels
+  socket.on("call:cancelled", () => {
+    console.log("☎️ Caller cancelled the call");
+    toast({ title: "Call cancelled" });
+    navigate("/dashboard");
+  });
+
+  return () => {
+    socket.off("call:accepted");
+    socket.off("call:rejected");
+    socket.off("call:cancelled");
+  };
+}, [socket]);
+
+
 
   const toggleMic = async () => {
     if (localAudioRef.current) {
@@ -350,23 +387,35 @@ if (!userId) {
     return `${m}:${s}`;
   };
 
-  if (!accepted) {
+  // ✅ Show different UI based on role before accepting
+if (role === "callee" && !accepted) {
   return (
-    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center animate-fade-in">
-      <h2 className="text-2xl font-semibold mb-2">📞 Incoming Call</h2>
-      <p className="text-gray-400 mb-6">Someone is calling you...</p>
+    
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center">
+
+      <audio id="incomingTone" autoPlay loop>
+  <source src="/sounds/incoming.mp3" type="audio/mpeg" />
+</audio>
+      <h2 className="text-2xl font-semibold mb-4">📞 Incoming Call</h2>
+      <p className="text-gray-400 mb-6">Tap “Accept” to enable audio & video</p>
 
       <div className="flex gap-6">
         <button
-          onClick={() => setAccepted(true)}
-          className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-full text-white font-semibold shadow-lg transition-transform hover:scale-105"
+          onClick={() => {
+            setAccepted(true);
+            safeEmit("call:accepted", { channelName }); // notify caller
+          }}
+          className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-full text-white font-semibold shadow-lg"
         >
           Accept
         </button>
 
         <button
-          onClick={() => navigate("/dashboard")}
-          className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-lg transition-transform hover:scale-105"
+          onClick={() => {
+            safeEmit("call:rejected", { channelName });
+            navigate("/dashboard");
+          }}
+          className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-lg"
         >
           Decline
         </button>
@@ -374,6 +423,33 @@ if (!userId) {
     </div>
   );
 }
+
+// ✅ Caller waiting screen
+if (role === "caller" && !accepted) {
+  return (
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white text-center">
+      <h2 className="text-2xl font-semibold mb-4">📞 Calling...</h2>
+      <p className="text-gray-400 mb-6">Waiting for other user to answer</p>
+
+      <audio id="ringtone" autoPlay loop>
+        <source src="/sounds/ringtone.mp3" type="audio/mpeg" />
+      </audio>
+
+      <button
+        onClick={() => {
+          const ring = document.getElementById("ringtone") as HTMLAudioElement;
+          if (ring) ring.pause();
+          safeEmit("call:cancelled", { channelName });
+          navigate("/dashboard");
+        }}
+        className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold"
+      >
+        Cancel Call
+      </button>
+    </div>
+  );
+}
+
 
 
 
