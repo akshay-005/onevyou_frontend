@@ -5,6 +5,7 @@ import AgoraRTC, { IAgoraRTCClient, ILocalVideoTrack, ILocalAudioTrack } from "a
 import { Mic, MicOff, Video, VideoOff, PhoneOff, Clock, Wifi, Maximize2 } from "lucide-react";
 import { useSocket, safeEmit } from "@/utils/socket";
 import { useToast } from "@/hooks/use-toast";
+import { motion, AnimatePresence } from "framer-motion";
 
 
 
@@ -41,6 +42,9 @@ const role = new URLSearchParams(window.location.search).get("role") || "caller"
 
   const query = new URLSearchParams(window.location.search);
   const durationMin = Number(query.get("duration")) || 1;
+  const [isConnecting, setIsConnecting] = useState(false);
+  
+
 
   // Safe play helper
   const safePlay = (track: any, elementId?: string) => {
@@ -338,11 +342,20 @@ useEffect(() => {
 
   // When callee accepts
   socket.on("call:accepted", () => {
-    console.log("✅ Callee accepted — joining room now...");
+  console.log("✅ Callee accepted — joining room now...");
+  const ring = document.getElementById("ringtone") as HTMLAudioElement;
+  if (ring) ring.pause();
+
+  // 🔄 Show connecting overlay
+  setIsConnecting(true);
+
+  // Wait 1.5s for smoother transition, then join
+  setTimeout(() => {
+    setIsConnecting(false);
     setAccepted(true);
-    const ring = document.getElementById("ringtone") as HTMLAudioElement;
-    if (ring) ring.pause();
-  });
+  }, 1500);
+});
+
 
   // When callee rejects
   socket.on("call:rejected", () => {
@@ -450,6 +463,30 @@ if (role === "caller" && !accepted) {
   );
 }
 
+// 🌀 Show Connecting Overlay
+if (isConnecting) {
+  return (
+    <AnimatePresence>
+      <motion.div
+        key="connecting-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.6 }}
+        className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white text-center"
+
+      >
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
+          className="w-12 h-12 border-4 border-t-transparent border-white rounded-full mb-6"
+        />
+        <h2 className="text-2xl font-semibold mb-2">🔗 Connecting...</h2>
+        <p className="text-gray-400 text-sm">Setting up your audio and video...</p>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
 
 
 
