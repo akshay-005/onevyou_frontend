@@ -7,15 +7,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
 import {
   IndianRupee,
-  Clock,
   CreditCard,
   Smartphone,
   Award,
@@ -23,6 +20,9 @@ import {
   Sparkles,
   Video,
 } from "lucide-react";
+
+// 🔹 NEW: import your axios helper
+import api from "@/utils/api"; 
 
 interface PricingModalProps {
   isOpen: boolean;
@@ -52,12 +52,10 @@ const PricingModal = ({
   const [customMinutes, setCustomMinutes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
 
-  // Sort pricing tiers by minutes
   const sortedTiers = [...teacher.pricingTiers].sort(
     (a, b) => a.minutes - b.minutes
   );
 
-  // Format durations for display
   const durations = sortedTiers.map((tier, index) => ({
     value: `${tier.minutes}`,
     label: `${tier.minutes} minute${tier.minutes > 1 ? "s" : ""}`,
@@ -65,7 +63,6 @@ const PricingModal = ({
     popular: index === Math.floor(sortedTiers.length / 2),
   }));
 
-  // Add custom option
   durations.push({
     value: "custom",
     label: "Custom duration",
@@ -91,7 +88,8 @@ const PricingModal = ({
     return duration?.price || 0;
   };
 
-  const handlePayment = () => {
+  // 🔹 NEW FUNCTION: Handles real Razorpay Payment Flow
+  const handlePayment = async () => {
     if (!paymentMethod) {
       toast({
         title: "Select Payment Method",
@@ -110,31 +108,66 @@ const PricingModal = ({
       return;
     }
 
-    toast({
-      title: "Processing Payment",
-      description: `Connecting you with ${teacher.name}...`,
-    });
+    const minutes =
+      selectedDuration === "custom"
+        ? parseInt(customMinutes)
+        : parseInt(selectedDuration);
+    const price = getPrice();
 
-    setTimeout(() => {
+    try {
+      // 🔹 1. Create order in backend
+      const { data } = await api.post("/payment/create-order", { amount: price });
+      if (!data?.order) throw new Error("Order creation failed");
+
+      // 🔹 2. Prepare Razorpay checkout options
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID, // from .env
+        amount: data.order.amount,
+        currency: data.order.currency,
+        name: "ONEVYOU",
+        description: `${minutes} minutes with ${teacher.name}`,
+        order_id: data.order.id,
+        handler: async function (response: any) {
+          // 🔹 3. Verify payment with backend
+          const verifyRes = await api.post("/payment/verify-payment", response);
+          if (verifyRes.data.success) {
+            toast({
+              title: "Payment Successful!",
+              description: "Starting your video call...",
+            });
+            onPaymentComplete({
+              teacherId: teacher.id || teacher._id || teacher.name,
+              minutes,
+              price,
+            });
+            onClose();
+          } else {
+            toast({
+              title: "Payment Failed",
+              description: "Verification failed. Please try again.",
+              variant: "destructive",
+            });
+          }
+        },
+        prefill: {
+          name: "User",
+          email: "user@example.com",
+          contact: "9999999999",
+        },
+        theme: { color: "#5a67d8" },
+      };
+
+      // 🔹 4. Open Razorpay widget
+      const rzp = new (window as any).Razorpay(options);
+      rzp.open();
+    } catch (err) {
+      console.error("Payment Error:", err);
       toast({
-        title: "Payment Successful!",
-        description: "Starting your video call...",
+        title: "Payment Error",
+        description: "Something went wrong while processing payment.",
+        variant: "destructive",
       });
-
-      const minutes =
-        selectedDuration === "custom"
-          ? parseInt(customMinutes)
-          : parseInt(selectedDuration);
-      const price = getPrice();
-
-      onPaymentComplete({
-        teacherId: teacher.id || teacher._id || teacher.name,
-        minutes,
-        price,
-      });
-
-      onClose();
-    }, 2000);
+    }
   };
 
   const totalAmount = getPrice();
@@ -147,7 +180,6 @@ const PricingModal = ({
             Connect with {teacher.name}
           </DialogTitle>
 
-          {/* ✅ FIXED: Proper wrapping for badges */}
           <DialogDescription asChild>
             <div className="mt-2">
               <div className="flex items-center gap-4 mt-3">
@@ -173,10 +205,9 @@ const PricingModal = ({
           </p>
         </div>
 
+        {/* --- Duration Selection --- */}
         <div className="space-y-4 py-4">
           <Label className="text-base font-semibold">Select Duration</Label>
-
-          {/* Duration Buttons */}
           <div className="grid grid-cols-2 gap-2">
             {durations
               .filter((d) => d.value !== "custom")
@@ -204,50 +235,6 @@ const PricingModal = ({
                 </Button>
               ))}
           </div>
-
-          {/*Custom Duration */}
-          {/*<Card
-            className={`p-3 cursor-pointer transition-all ${
-              selectedDuration === "custom" ? "ring-2 ring-primary" : ""
-            }`}
-            onClick={() => setSelectedDuration("custom")}
-          >
-            <div className="flex items-center space-x-2">
-              <RadioGroup
-                value={selectedDuration}
-                onValueChange={setSelectedDuration}
-              >
-                <RadioGroupItem value="custom" id="custom" />
-              </RadioGroup>
-              <Label htmlFor="custom" className="flex-1 cursor-pointer">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                    Custom duration
-                  </span>
-                  {selectedDuration === "custom" && customMinutes && (
-                    <span className="font-bold text-lg flex items-center">
-                      <IndianRupee className="h-4 w-4" />
-                      {getPrice()}
-                    </span>
-                  )}
-                </div>
-              </Label>
-            </div>
-            {selectedDuration === "custom" && (
-              <div className="mt-3">
-                <Input
-                  type="number"
-                  min="1"
-                  max="120"
-                  placeholder="Enter minutes"
-                  value={customMinutes}
-                  onChange={(e) => setCustomMinutes(e.target.value)}
-                  className="w-full"
-                />
-              </div>
-            )}
-          </Card> */}
 
           {/* Payment Methods */}
           <div className="space-y-3">
@@ -282,7 +269,7 @@ const PricingModal = ({
             </div>
           </div>
 
-          {/* Total Amount */}
+          {/* Total */}
           {(selectedDuration || customMinutes) && (
             <div className="bg-gradient-to-r from-primary/5 to-accent/5 rounded-lg p-4 border border-primary/20">
               <div className="flex items-center justify-between">
@@ -303,7 +290,7 @@ const PricingModal = ({
           </Button>
           <Button
             className="flex-1 bg-gradient-flow hover:opacity-90"
-            onClick={handlePayment}
+            onClick={handlePayment} // ✅ replaced your old setTimeout fake payment
             disabled={
               (!selectedDuration ||
                 (selectedDuration === "custom" && !customMinutes)) ||
