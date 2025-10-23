@@ -55,23 +55,20 @@ const CallRoom: React.FC = () => {
     hasJoinedRef.current = true;
 
     const init = async () => {
-      // 🔓 Ensure mobile browsers allow audio/video playback
-const unlockMedia = () => {
+      // 🔓 Fully unlock mic and camera before joining
+const unlockMedia = async () => {
   try {
-    const el = document.createElement("video");
-    el.muted = true;
-    el.autoplay = true;
-    el.playsInline = true;
-    el.srcObject = null;
-    document.body.appendChild(el);
-    el.play().catch(() => {});
-    document.body.removeChild(el);
-    console.log("✅ Media unlocked for mobile autoplay");
+    console.log("🔓 Requesting audio/video permission...");
+    const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    tempStream.getTracks().forEach(track => track.stop());
+    console.log("✅ Media unlocked (mic + cam permissions granted)");
   } catch (err) {
-    console.warn("Media unlock error:", err);
+    console.warn("⚠️ Media unlock failed:", err);
   }
 };
-unlockMedia(); 
+await unlockMedia();
+
+
 
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "h264" });
       clientRef.current = client;
@@ -121,6 +118,19 @@ unlockMedia();
         await client.publish(video ? [audio, video] : [audio]);
         console.log("✅ Published");
 
+        // 🧩 Mobile audio unlock fallback (for Safari/Chrome mobile)
+document.addEventListener("click", () => {
+  if (localAudioRef.current) {
+    try {
+      localAudioRef.current.play?.().catch(() => {});
+      console.log("🎧 Manual audio play triggered on user interaction");
+    } catch (err) {
+      console.warn("Audio play error:", err);
+    }
+  }
+}, { once: true });
+
+
         // Handle remote users
         client.on("user-published", async (user, mediaType) => {
           console.log(`📥 ${user.uid} published ${mediaType}`);
@@ -157,8 +167,14 @@ setTimeout(() => tryPlay(), 700);
             }
             
             if (mediaType === "audio") {
-              safePlay(user.audioTrack);
-            }
+  if (user.audioTrack) {
+    console.log(`🎧 Playing remote audio for ${user.uid}`);
+    safePlay(user.audioTrack);
+  } else {
+    console.warn("⚠️ No remote audio track found — possible permission issue");
+  }
+}
+
 
             setRemoteUsers(prev => {
               if (prev.find(u => u.uid === user.uid)) return prev;
