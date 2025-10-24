@@ -1,4 +1,4 @@
-// frontend/src/pages/CallRoom.tsx - FIXED VERSION
+// frontend/src/pages/CallRoom.tsx - FINAL PRODUCTION VERSION
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AgoraRTC, { IAgoraRTCClient, ILocalVideoTrack, ILocalAudioTrack } from "agora-rtc-sdk-ng";
@@ -21,8 +21,8 @@ const CallRoom: React.FC = () => {
   const localVideoRef = useRef<ILocalVideoTrack | null>(null);
   const hasJoinedRef = useRef(false);
   const cleanupDoneRef = useRef(false);
-  const autoEndTimerRef = useRef<number | null>(null);
   const isCleaningUpRef = useRef(false);
+  const autoEndTimerRef = useRef<number | null>(null);
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -40,7 +40,11 @@ const CallRoom: React.FC = () => {
   const query = new URLSearchParams(window.location.search);
   const durationMin = Number(query.get("duration")) || 1;
 
-  // Safe play helper with better error handling
+  // 🔧 FIX #1: Accurate call timer (no early ending)
+  const CALL_DURATION_MS = durationMin * 60 * 1000;
+  const GRACE_PERIOD_MS = 5000; // 5 extra seconds for network delays
+
+  // Safe play helper
   const safePlay = async (track: any, elementId?: string) => {
     if (!track) return;
     
@@ -56,9 +60,8 @@ const CallRoom: React.FC = () => {
     }
   };
 
-  // Cleanup function with proper guards
+  // Cleanup function
   const cleanup = async () => {
-    // Prevent multiple simultaneous cleanups
     if (isCleaningUpRef.current) {
       console.log("⚠️ Cleanup already in progress, skipping");
       return;
@@ -83,52 +86,47 @@ const CallRoom: React.FC = () => {
       autoEndTimerRef.current = null;
     }
 
-    // Calculate elapsed time
+    // Calculate actual elapsed time
     const elapsed = startTimeRef.current > 0 
       ? Math.floor((Date.now() - startTimeRef.current) / 1000)
       : 0;
 
-    // Notify backend about call end
+    // Notify backend
     const userId = localStorage.getItem("userId");
     if (userId && channelName) {
       safeEmit("call:end", { channelName, durationSec: elapsed, userId });
     }
 
-    // Stop all audio playback
+    // Stop all audio
     const audioElements = document.querySelectorAll("audio");
     audioElements.forEach(audio => {
       audio.pause();
       audio.src = "";
     });
 
-    // Clean up Agora client
+    // Clean up Agora
     const client = clientRef.current;
     if (client) {
       try {
-        // Unpublish tracks first
         if (localAudioRef.current || localVideoRef.current) {
           const tracks = [localAudioRef.current, localVideoRef.current].filter(Boolean);
           if (tracks.length > 0) {
             await client.unpublish(tracks as any).catch(() => {});
           }
         }
-
-        // Leave channel
         await client.leave().catch(() => {});
-        
-        // Remove all listeners
         client.removeAllListeners();
       } catch (err) {
-        console.warn("Client cleanup error (non-critical):", err);
+        console.warn("Client cleanup warning:", err);
       }
     }
 
-    // Close local tracks
+    // Close tracks
     if (localAudioRef.current) {
       try {
         localAudioRef.current.close();
       } catch (e) {
-        console.warn("Audio track close error:", e);
+        console.warn("Audio close warning:", e);
       }
       localAudioRef.current = null;
     }
@@ -137,24 +135,27 @@ const CallRoom: React.FC = () => {
       try {
         localVideoRef.current.close();
       } catch (e) {
-        console.warn("Video track close error:", e);
+        console.warn("Video close warning:", e);
       }
       localVideoRef.current = null;
     }
 
-    // Mark cleanup as done
     cleanupDoneRef.current = true;
     isCleaningUpRef.current = false;
     
     console.log("✅ Cleanup complete");
     
-    toast({ title: "Call ended", description: `Duration: ${Math.floor(elapsed / 60)}m ${elapsed % 60}s` });
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    toast({ 
+      title: "Call ended", 
+      description: `Duration: ${mins}m ${secs}s` 
+    });
     
-    // Small delay before navigation to ensure cleanup completes
     setTimeout(() => navigate("/dashboard"), 300);
   };
 
-  // Main call initialization
+  // 🔧 FIX #2: Better remote user handling
   useEffect(() => {
     if (!accepted || !channelName || hasJoinedRef.current) return;
 
@@ -163,7 +164,7 @@ const CallRoom: React.FC = () => {
 
     const init = async () => {
       try {
-        // Request permissions first
+        // Request permissions
         console.log("🔓 Requesting permissions...");
         const tempStream = await navigator.mediaDevices.getUserMedia({ 
           audio: true, 
@@ -174,11 +175,14 @@ const CallRoom: React.FC = () => {
 
         if (!mounted) return;
 
-        // Create Agora client
-        const client = AgoraRTC.createClient({ mode: "rtc", codec: "h264" });
+        // Create client
+        const client = AgoraRTC.createClient({ 
+          mode: "rtc", 
+          codec: "vp8" // 🔧 Changed from h264 to vp8 for better compatibility
+        });
         clientRef.current = client;
 
-        // Get token from backend
+        // Get token
         const res = await fetch(
           `${API_BASE}/api/agora/token?channelName=${channelName}&durationMin=${durationMin}`
         );
@@ -196,7 +200,7 @@ const CallRoom: React.FC = () => {
 
         if (!mounted) return;
 
-        // Create audio and video tracks
+        // Create tracks
         console.log("🎥 Creating media tracks...");
         let audio: ILocalAudioTrack;
         let video: ILocalVideoTrack | null = null;
@@ -206,7 +210,10 @@ const CallRoom: React.FC = () => {
             { 
               AEC: true, 
               AGC: true, 
-              ANS: true 
+              ANS: true,
+              echoCancellation: true, // 🔧 Enhanced audio
+              noiseSuppression: true,
+              autoGainControl: true
             },
             { 
               encoderConfig: "480p_1",
@@ -214,7 +221,7 @@ const CallRoom: React.FC = () => {
             }
           );
         } catch (err) {
-          console.warn("Camera failed, trying audio only:", err);
+          console.warn("Camera failed, using audio only:", err);
           audio = await AgoraRTC.createMicrophoneAudioTrack({
             AEC: true,
             AGC: true,
@@ -222,7 +229,7 @@ const CallRoom: React.FC = () => {
           });
           toast({ 
             title: "Camera unavailable", 
-            description: "Continuing with audio only",
+            description: "Audio-only mode",
             variant: "destructive" 
           });
         }
@@ -237,7 +244,10 @@ const CallRoom: React.FC = () => {
           await safePlay(video, "local-player");
         }
 
-        // Publish to channel
+        // 🔧 FIX #3: Ensure tracks are ready before publishing
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Publish
         const tracksToPublish = video ? [audio, video] : [audio];
         console.log("📤 Publishing tracks...");
         await client.publish(tracksToPublish as any);
@@ -245,39 +255,73 @@ const CallRoom: React.FC = () => {
 
         if (!mounted) return;
 
-        // Handle remote users
+        // 🔧 FIX #4: Better remote user event handling
         client.on("user-published", async (user, mediaType) => {
           console.log(`📥 Remote user ${user.uid} published ${mediaType}`);
           
           try {
             await client.subscribe(user, mediaType);
+            console.log(`✅ Subscribed to ${user.uid} ${mediaType}`);
             
             if (mediaType === "video") {
-              setTimeout(async () => {
-                const container = document.getElementById("remote-player");
-                if (container && user.videoTrack) {
-                  let playerDiv = document.getElementById(`player-${user.uid}`);
-                  if (!playerDiv) {
-                    playerDiv = document.createElement("div");
-                    playerDiv.id = `player-${user.uid}`;
-                    playerDiv.className = "w-full h-full";
-                    container.appendChild(playerDiv);
-                  }
-                  await safePlay(user.videoTrack, `player-${user.uid}`);
-                  console.log(`🎥 Playing remote video for ${user.uid}`);
+              // Wait for DOM to be ready
+              await new Promise(resolve => setTimeout(resolve, 800));
+              
+              const container = document.getElementById("remote-player");
+              if (container && user.videoTrack) {
+                let playerDiv = document.getElementById(`player-${user.uid}`);
+                if (!playerDiv) {
+                  playerDiv = document.createElement("div");
+                  playerDiv.id = `player-${user.uid}`;
+                  playerDiv.className = "w-full h-full";
+                  container.appendChild(playerDiv);
                 }
-              }, 500);
+                
+                // Play with retry
+                let retryCount = 0;
+                const tryPlay = async () => {
+                  try {
+                    await safePlay(user.videoTrack, `player-${user.uid}`);
+                    console.log(`🎥 Playing remote video for ${user.uid}`);
+                  } catch (err) {
+                    if (retryCount < 3) {
+                      retryCount++;
+                      console.log(`Retry ${retryCount} for video ${user.uid}`);
+                      setTimeout(() => tryPlay(), 500);
+                    } else {
+                      console.error("Video play failed after retries");
+                    }
+                  }
+                };
+                
+                await tryPlay();
+              }
             }
             
             if (mediaType === "audio" && user.audioTrack) {
-              await safePlay(user.audioTrack);
-              console.log(`🎧 Playing remote audio for ${user.uid}`);
+              // Play audio with retry
+              let audioRetries = 0;
+              const tryAudioPlay = async () => {
+                try {
+                  await safePlay(user.audioTrack);
+                  console.log(`🎧 Playing remote audio for ${user.uid}`);
+                } catch (err) {
+                  if (audioRetries < 3) {
+                    audioRetries++;
+                    setTimeout(() => tryAudioPlay(), 500);
+                  }
+                }
+              };
+              
+              await tryAudioPlay();
             }
 
+            // Update remote users state
             setRemoteUsers(prev => {
               if (prev.find(u => u.uid === user.uid)) return prev;
               return [...prev, user];
             });
+            
           } catch (err) {
             console.error("Subscribe error:", err);
           }
@@ -306,7 +350,7 @@ const CallRoom: React.FC = () => {
 
         if (!mounted) return;
 
-        // Start call timer
+        // Start timer
         startTimeRef.current = Date.now();
         timerRef.current = window.setInterval(() => {
           setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
@@ -314,13 +358,14 @@ const CallRoom: React.FC = () => {
 
         setJoined(true);
 
-        // Auto-end timer
-        const autoEndMs = durationMin * 60 * 1000 + 3000;
-        console.log(`⏰ Auto-end scheduled in ${durationMin}min`);
+        // 🔧 FIX #5: Accurate auto-end with grace period
+        const totalDuration = CALL_DURATION_MS + GRACE_PERIOD_MS;
+        console.log(`⏰ Auto-end scheduled in ${durationMin}min + 5s grace`);
+        
         autoEndTimerRef.current = window.setTimeout(() => {
-          console.log("⏰ Call duration reached, ending...");
+          console.log("⏰ Call duration reached");
           cleanup();
-        }, autoEndMs);
+        }, totalDuration);
 
         // Notify backend
         const userId = localStorage.getItem("userId");
@@ -341,7 +386,6 @@ const CallRoom: React.FC = () => {
 
     init();
 
-    // Socket event handlers
     const handleCallEnded = () => {
       console.log("📞 Call ended by server");
       cleanup();
@@ -349,7 +393,6 @@ const CallRoom: React.FC = () => {
 
     socket?.on("call:ended", handleCallEnded);
 
-    // Cleanup on unmount
     return () => {
       mounted = false;
       socket?.off("call:ended", handleCallEnded);
@@ -359,7 +402,7 @@ const CallRoom: React.FC = () => {
     };
   }, [accepted, channelName]);
 
-  // Socket communication for call acceptance
+  // Socket events
   useEffect(() => {
     if (!socket) return;
 
@@ -379,7 +422,7 @@ const CallRoom: React.FC = () => {
 
     const handleRejected = () => {
       console.log("❌ Call rejected");
-      toast({ title: "Call Declined", description: "The user declined your call" });
+      toast({ title: "Call Declined", description: "User declined your call" });
       navigate("/dashboard");
     };
 
@@ -400,7 +443,7 @@ const CallRoom: React.FC = () => {
     };
   }, [socket, navigate]);
 
-  // Control functions
+  // Controls
   const toggleMic = async () => {
     if (localAudioRef.current) {
       await localAudioRef.current.setEnabled(!isMicOn);
@@ -438,7 +481,7 @@ const CallRoom: React.FC = () => {
           className="space-y-6"
         >
           <div className="w-24 h-24 mx-auto bg-green-500/20 rounded-full flex items-center justify-center animate-pulse">
-            <PhoneOff className="w-12 h-12 text-green-500" />
+            <PhoneOff className="w-12 h-12 text-green-500 rotate-180" />
           </div>
           
           <h2 className="text-3xl font-bold">📞 Incoming Call</h2>
@@ -577,7 +620,7 @@ const CallRoom: React.FC = () => {
                 Waiting for other person...
               </motion.div>
               <div className="text-gray-500 text-sm">
-                {joined ? "Connected to call" : "Connecting..."}
+                {joined ? "Connected" : "Connecting..."}
               </div>
             </motion.div>
           )}
@@ -587,6 +630,7 @@ const CallRoom: React.FC = () => {
         <div className="absolute top-4 left-4 bg-black/70 backdrop-blur px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
           <Clock className="w-5 h-5 text-green-400" />
           <span className="text-lg font-mono font-semibold">{format(durationSec)}</span>
+          <span className="text-xs text-gray-400">/ {durationMin}:00</span>
         </div>
 
         {/* Local video preview */}
