@@ -53,7 +53,7 @@ const PricingModal = ({
   const [customMinutes, setCustomMinutes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
 
-  // ✅ NEW: Store current user data
+  // ✅ Store current user data
   const [currentUser, setCurrentUser] = useState<any>(null);
 
   const sortedTiers = [...teacher.pricingTiers].sort(
@@ -78,14 +78,12 @@ const PricingModal = ({
   useEffect(() => {
     const loadUser = async () => {
       try {
-        // Option 1: Get from localStorage first (faster)
         const { user } = getUserSession();
         
         if (user) {
           setCurrentUser(user);
           console.log("✅ Loaded user from localStorage:", user);
         } else {
-          // Option 2: Fetch from backend if not in localStorage
           const response = await api.getMe();
           if (response?.success && response?.user) {
             setCurrentUser(response.user);
@@ -124,7 +122,6 @@ const PricingModal = ({
   const getUserPhone = () => {
     if (!currentUser) return "9999999999";
     
-    // Try different possible phone number fields
     return (
       currentUser.phoneNumber || 
       currentUser.phone || 
@@ -160,6 +157,9 @@ const PricingModal = ({
         : parseInt(selectedDuration);
     const price = getPrice();
 
+    // ✅ CLOSE YOUR MODAL BEFORE OPENING RAZORPAY
+    onClose();
+
     try {
       // 🔹 1️⃣ Create order in backend
       const orderRes = await api.createOrder(price);
@@ -176,6 +176,7 @@ const PricingModal = ({
         name: userName,
         email: userEmail,
         phone: userPhone,
+        amount: price,
       });
 
       // 🔹 2️⃣ Prepare Razorpay checkout options
@@ -186,49 +187,112 @@ const PricingModal = ({
         name: "ONEVYOU",
         description: `${minutes} minutes with ${teacher.name}`,
         order_id: order.id,
-
+        
         // 🧠 This runs automatically when payment succeeds
         handler: async function (response: any) {
-          const verifyRes = await api.verifyPayment(response);
-          if (verifyRes.success) {
+          try {
+            const verifyRes = await api.verifyPayment(response);
+            if (verifyRes.success) {
+              toast({
+                title: "Payment Successful!",
+                description: "Starting your video call...",
+              });
+              onPaymentComplete({
+                teacherId: teacher.id || teacher._id || teacher.name,
+                minutes,
+                price,
+              });
+            } else {
+              toast({
+                title: "Payment Verification Failed",
+                description: "Please try again.",
+                variant: "destructive",
+              });
+            }
+          } catch (err) {
+            console.error("Payment verification error:", err);
             toast({
-              title: "Payment Successful!",
-              description: "Starting your video call...",
-            });
-            onPaymentComplete({
-              teacherId: teacher.id || teacher._id || teacher.name,
-              minutes,
-              price,
-            });
-            onClose();
-          } else {
-            toast({
-              title: "Payment Verification Failed",
-              description: "Please try again.",
+              title: "Verification Error",
+              description: "Could not verify payment",
               variant: "destructive",
             });
           }
         },
 
-        // ✅ FIXED: Use real user data
+        // ✅ Real user data
         prefill: {
           name: userName,
           email: userEmail,
           contact: userPhone,
         },
         
-        theme: { color: "#5a67d8" },
+        // ✅ Payment method preferences (UPI first)
+        config: {
+          display: {
+            blocks: {
+              banks: {
+                name: 'Pay via UPI',
+                instruments: [
+                  {
+                    method: 'upi'
+                  }
+                ]
+              }
+            },
+            sequence: ['block.banks'],
+            preferences: {
+              show_default_blocks: true
+            }
+          }
+        },
         
-        // ✅ Optional: Add modal customization
+        theme: { 
+          color: "#5a67d8",
+          backdrop_color: "rgba(0, 0, 0, 0.5)"
+        },
+        
+        // ✅ Modal customization
         modal: {
+          backdropclose: false,
+          escape: true,
+          handleback: true,
+          confirm_close: true,
           ondismiss: function() {
             console.log("Payment modal closed by user");
-          }
+            toast({
+              title: "Payment Cancelled",
+              description: "You can try again anytime",
+            });
+          },
+          animation: true
+        },
+        
+        // ✅ Retry on failure
+        retry: {
+          enabled: true,
+          max_count: 3
+        },
+        
+        // ✅ Optional: Add notes for tracking
+        notes: {
+          teacher_id: teacher.id || teacher._id,
+          duration: minutes,
+          teacher_name: teacher.name
         }
       };
 
-      // 🔹 3️⃣ Open Razorpay widget
+      // 🔹 3️⃣ Open Razorpay widget with proper error handling
       const rzp = new (window as any).Razorpay(options);
+      
+      rzp.on('payment.failed', function (response: any) {
+        console.error("Payment failed:", response.error);
+        toast({
+          title: "Payment Failed",
+          description: response.error.description || "Please try again",
+          variant: "destructive",
+        });
+      });
+
       rzp.open();
     } catch (err) {
       console.error("❌ Payment Error:", err);
