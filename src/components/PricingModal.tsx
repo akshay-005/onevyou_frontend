@@ -92,8 +92,8 @@ const PricingModal = ({
 const handlePayment = async () => {
   if (!paymentMethod) {
     toast({
-      title: "Select Payment Method",
-      description: "Please select a payment method to continue",
+      title: "Choose Payment Method",
+      description: "Please select a payment method first.",
       variant: "destructive",
     });
     return;
@@ -121,7 +121,17 @@ const handlePayment = async () => {
       throw new Error("Order creation failed");
     const order = orderRes.order;
 
-    // 🔹 2️⃣ Prepare Razorpay checkout options
+    // 🔹 Map frontend payment method to Razorpay format
+    const mappedMethod =
+      paymentMethod === "card"
+        ? "card"
+        : paymentMethod === "wallet"
+        ? "wallet"
+        : paymentMethod === "netbanking"
+        ? "netbanking"
+        : "upi";
+
+    // 🔹 2️⃣ Razorpay checkout options with all methods enabled
     const options = {
       key: import.meta.env.VITE_RAZORPAY_KEY_ID,
       amount: order.amount,
@@ -130,7 +140,39 @@ const handlePayment = async () => {
       description: `${minutes} minutes with ${teacher.name}`,
       order_id: order.id,
 
-      // 🧠 This runs automatically when payment succeeds
+      // ✅ Explicitly enable all payment methods
+      method: {
+        upi: true,
+        card: true,
+        wallet: true,
+        netbanking: true,
+      },
+
+      // ✅ UI layout preferences
+      config: {
+        display: {
+          blocks: {
+            upi: { name: "UPI", instruments: [{ method: "upi" }] },
+            card: { name: "Cards", instruments: [{ method: "card" }] },
+            wallet: { name: "Wallets", instruments: [{ method: "wallet" }] },
+            netbanking: {
+              name: "Netbanking",
+              instruments: [{ method: "netbanking" }],
+            },
+          },
+          sequence: ["upi", "card", "wallet", "netbanking"],
+          preferences: { show_default_blocks: true },
+        },
+      },
+
+      // ✅ Auto-select the chosen method
+      modal: {
+        ondismiss: function () {
+          console.log("🛑 Payment modal closed");
+        },
+      },
+
+      // 🧠 Runs when payment succeeds
       handler: async function (response: any) {
         const verifyRes = await api.verifyPayment(response);
         if (verifyRes.success) {
@@ -161,7 +203,7 @@ const handlePayment = async () => {
       theme: { color: "#5a67d8" },
     };
 
-    // 🔹 3️⃣ Open Razorpay widget
+    // 🔹 3️⃣ Open Razorpay widget immediately after options are ready
     const rzp = new (window as any).Razorpay(options);
     rzp.open();
   } catch (err) {
@@ -173,6 +215,7 @@ const handlePayment = async () => {
     });
   }
 };
+
 
 
   const totalAmount = getPrice();
