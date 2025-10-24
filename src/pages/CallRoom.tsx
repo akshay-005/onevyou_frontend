@@ -359,7 +359,8 @@ const CallRoom: React.FC = () => {
         setJoined(true);
 
         // 🔧 FIX #5: Accurate auto-end with grace period
-        const totalDuration = CALL_DURATION_MS + GRACE_PERIOD_MS;
+        const totalDuration = CALL_DURATION_MS + 2000; // 2s grace instead of 5s
+
         console.log(`⏰ Auto-end scheduled in ${durationMin}min + 5s grace`);
         
         autoEndTimerRef.current = window.setTimeout(() => {
@@ -498,6 +499,11 @@ const CallRoom: React.FC = () => {
                   audio.src = "";
                 }
                 setAccepted(true);
+                document.querySelectorAll("audio").forEach(a => { 
+  a.pause(); 
+  a.src = ""; 
+});
+
                 safeEmit("call:response", {
                   toUserId: callerId,
                   accepted: true,
