@@ -21,8 +21,9 @@ import {
   Video,
 } from "lucide-react";
 
-// 🔹 NEW: import your axios helper
-import api from "@/utils/api"; 
+// ✅ Import helpers
+import api from "@/utils/api";
+import { getUserSession } from "@/utils/storage";
 
 interface PricingModalProps {
   isOpen: boolean;
@@ -52,6 +53,9 @@ const PricingModal = ({
   const [customMinutes, setCustomMinutes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
 
+  // ✅ NEW: Store current user data
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
   const sortedTiers = [...teacher.pricingTiers].sort(
     (a, b) => a.minutes - b.minutes
   );
@@ -69,6 +73,34 @@ const PricingModal = ({
     price: 0,
     popular: false,
   });
+
+  // ✅ Load user data on mount
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        // Option 1: Get from localStorage first (faster)
+        const { user } = getUserSession();
+        
+        if (user) {
+          setCurrentUser(user);
+          console.log("✅ Loaded user from localStorage:", user);
+        } else {
+          // Option 2: Fetch from backend if not in localStorage
+          const response = await api.getMe();
+          if (response?.success && response?.user) {
+            setCurrentUser(response.user);
+            console.log("✅ Fetched user from API:", response.user);
+          }
+        }
+      } catch (err) {
+        console.error("❌ Error loading user:", err);
+      }
+    };
+
+    if (isOpen) {
+      loadUser();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     const popularOption = durations.find((d) => d.popular);
@@ -88,92 +120,125 @@ const PricingModal = ({
     return duration?.price || 0;
   };
 
+  // ✅ Extract phone number from user data
+  const getUserPhone = () => {
+    if (!currentUser) return "9999999999";
+    
+    // Try different possible phone number fields
+    return (
+      currentUser.phoneNumber || 
+      currentUser.phone || 
+      currentUser.mobile ||
+      currentUser.profile?.phoneNumber ||
+      "9999999999"
+    );
+  };
+
   // ✅ Handles Razorpay Payment Flow
-const handlePayment = async () => {
-  if (!paymentMethod) {
-    toast({
-      title: "Select Payment Method",
-      description: "Please select a payment method to continue",
-      variant: "destructive",
-    });
-    return;
-  }
+  const handlePayment = async () => {
+    if (!paymentMethod) {
+      toast({
+        title: "Select Payment Method",
+        description: "Please select a payment method to continue",
+        variant: "destructive",
+      });
+      return;
+    }
 
-  if (!selectedDuration && !customMinutes) {
-    toast({
-      title: "Select Duration",
-      description: "Please choose or enter a duration before continuing.",
-      variant: "destructive",
-    });
-    return;
-  }
+    if (!selectedDuration && !customMinutes) {
+      toast({
+        title: "Select Duration",
+        description: "Please choose or enter a duration before continuing.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-  const minutes =
-    selectedDuration === "custom"
-      ? parseInt(customMinutes)
-      : parseInt(selectedDuration);
-  const price = getPrice();
+    const minutes =
+      selectedDuration === "custom"
+        ? parseInt(customMinutes)
+        : parseInt(selectedDuration);
+    const price = getPrice();
 
-  try {
-    // 🔹 1️⃣ Create order in backend
-    const orderRes = await api.createOrder(price);
-    if (!orderRes.success || !orderRes.order)
-      throw new Error("Order creation failed");
-    const order = orderRes.order;
+    try {
+      // 🔹 1️⃣ Create order in backend
+      const orderRes = await api.createOrder(price);
+      if (!orderRes.success || !orderRes.order)
+        throw new Error("Order creation failed");
+      const order = orderRes.order;
 
-    // 🔹 2️⃣ Prepare Razorpay checkout options
-    const options = {
-      key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-      amount: order.amount,
-      currency: order.currency,
-      name: "ONEVYOU",
-      description: `${minutes} minutes with ${teacher.name}`,
-      order_id: order.id,
+      // ✅ Extract user data for prefill
+      const userPhone = getUserPhone();
+      const userName = currentUser?.fullName || currentUser?.name || "User";
+      const userEmail = currentUser?.email || "user@example.com";
 
-      // 🧠 This runs automatically when payment succeeds
-      handler: async function (response: any) {
-        const verifyRes = await api.verifyPayment(response);
-        if (verifyRes.success) {
-          toast({
-            title: "Payment Successful!",
-            description: "Starting your video call...",
-          });
-          onPaymentComplete({
-            teacherId: teacher.id || teacher._id || teacher.name,
-            minutes,
-            price,
-          });
-          onClose();
-        } else {
-          toast({
-            title: "Payment Verification Failed",
-            description: "Please try again.",
-            variant: "destructive",
-          });
+      console.log("💳 Payment prefill data:", {
+        name: userName,
+        email: userEmail,
+        phone: userPhone,
+      });
+
+      // 🔹 2️⃣ Prepare Razorpay checkout options
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: order.amount,
+        currency: order.currency,
+        name: "ONEVYOU",
+        description: `${minutes} minutes with ${teacher.name}`,
+        order_id: order.id,
+
+        // 🧠 This runs automatically when payment succeeds
+        handler: async function (response: any) {
+          const verifyRes = await api.verifyPayment(response);
+          if (verifyRes.success) {
+            toast({
+              title: "Payment Successful!",
+              description: "Starting your video call...",
+            });
+            onPaymentComplete({
+              teacherId: teacher.id || teacher._id || teacher.name,
+              minutes,
+              price,
+            });
+            onClose();
+          } else {
+            toast({
+              title: "Payment Verification Failed",
+              description: "Please try again.",
+              variant: "destructive",
+            });
+          }
+        },
+
+        // ✅ FIXED: Use real user data
+        prefill: {
+          name: userName,
+          email: userEmail,
+          contact: userPhone,
+        },
+        
+        theme: { color: "#5a67d8" },
+        
+        // ✅ Optional: Add modal customization
+        modal: {
+          ondismiss: function() {
+            console.log("Payment modal closed by user");
+          }
         }
-      },
+      };
 
-      prefill: {
-        name: "User",
-        email: "user@example.com",
-        contact: "9999999999",
-      },
-      theme: { color: "#5a67d8" },
-    };
-
-    // 🔹 3️⃣ Open Razorpay widget
-    const rzp = new (window as any).Razorpay(options);
-    rzp.open();
-  } catch (err) {
-    console.error("❌ Payment Error:", err);
-    toast({
-      title: "Payment Error",
-      description: "Something went wrong while processing payment.",
-      variant: "destructive",
-    });
-  }
-};
-
+      // 🔹 3️⃣ Open Razorpay widget
+      const rzp = new (window as any).Razorpay(options);
+      rzp.open();
+    } catch (err) {
+      console.error("❌ Payment Error:", err);
+      toast({
+        title: "Payment Error",
+        description: "Something went wrong while processing payment.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const totalAmount = getPrice();
 
@@ -210,7 +275,7 @@ const handlePayment = async () => {
           </p>
         </div>
 
-        {/* --- Duration Selection --- */}
+        {/* Duration Selection */}
         <div className="space-y-4 py-4">
           <Label className="text-base font-semibold">Select Duration</Label>
           <div className="grid grid-cols-2 gap-2">
@@ -295,7 +360,7 @@ const handlePayment = async () => {
           </Button>
           <Button
             className="flex-1 bg-gradient-flow hover:opacity-90"
-            onClick={handlePayment} // ✅ replaced your old setTimeout fake payment
+            onClick={handlePayment}
             disabled={
               (!selectedDuration ||
                 (selectedDuration === "custom" && !customMinutes)) ||
