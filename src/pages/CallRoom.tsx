@@ -194,11 +194,39 @@ const CallRoom: React.FC = () => {
 
         if (!mounted) return;
 
-        console.log("🔗 Joining channel...");
-        await client.join(data.appId, channelName, data.token, data.uid);
-        console.log("✅ Joined channel");
+       console.log("🔗 Preparing to join channel...");
+// ⏱️ Add a slight delay to avoid Agora race condition on mobile
+await new Promise(resolve => setTimeout(resolve, 400));
+
+console.log("🔗 Preparing to join channel...");
+// ⏱️ Add a slight delay to avoid Agora race condition on mobile
+await new Promise(resolve => setTimeout(resolve, 400));
+
+console.log("🔗 Joining channel...");
+await client.join(data.appId, channelName, data.token, data.uid);
+console.log("✅ Joined channel");
+
+
 
         if (!mounted) return;
+
+        // ⚡ Bind remote event handlers *before* creating or publishing local tracks
+client.on("user-published", async (user, mediaType) => {
+  console.log(`📥 Remote user ${user.uid} published ${mediaType}`);
+  try {
+    await client.subscribe(user, mediaType);
+    console.log(`✅ Subscribed to ${user.uid} ${mediaType}`);
+    if (mediaType === "video" && user.videoTrack) {
+      await safePlay(user.videoTrack, "remote-player");
+    }
+    if (mediaType === "audio" && user.audioTrack) {
+      await safePlay(user.audioTrack);
+    }
+  } catch (err) {
+    console.error("Subscribe error:", err);
+  }
+});
+
 
         // Create tracks
         console.log("🎥 Creating media tracks...");
@@ -342,11 +370,16 @@ const CallRoom: React.FC = () => {
 
         client.on("connection-state-change", (cur, prev) => {
           console.log(`Connection: ${prev} → ${cur}`);
-          if (cur === "DISCONNECTED" && !cleanupDoneRef.current) {
-            console.warn("⚠️ Unexpected disconnect");
-            cleanup();
-          }
-        });
+         if (cur === "DISCONNECTED") {
+  console.warn("⚠️ Unexpected disconnect");
+  // prevent double cleanup race
+  if (!isCleaningUpRef.current && !cleanupDoneRef.current) {
+    cleanup();
+  } else {
+    console.log("⚠️ Disconnect detected but cleanup already running — ignored");
+  }
+}
+
 
         if (!mounted) return;
 
