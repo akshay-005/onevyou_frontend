@@ -194,9 +194,6 @@ const CallRoom: React.FC = () => {
 
         if (!mounted) return;
 
-       console.log("🔗 Preparing to join channel...");
-// ⏱️ Add a slight delay to avoid Agora race condition on mobile
-await new Promise(resolve => setTimeout(resolve, 400));
 
 console.log("🔗 Preparing to join channel...");
 // ⏱️ Add a slight delay to avoid Agora race condition on mobile
@@ -379,6 +376,7 @@ client.on("user-published", async (user, mediaType) => {
     console.log("⚠️ Disconnect detected but cleanup already running — ignored");
   }
 }
+});
 
 
         if (!mounted) return;
