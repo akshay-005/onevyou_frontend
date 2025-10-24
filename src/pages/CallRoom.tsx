@@ -324,21 +324,14 @@ const CallRoom: React.FC = () => {
         if (!mounted) return;
 
         // Start timer
-        startTimeRef.current = Date.now();
+        {/*startTimeRef.current = Date.now();
         timerRef.current = window.setInterval(() => {
           setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
         }, 1000);
 
-        setJoined(true);
+        setJoined(true);*/}
 
-        // 🔧 CRITICAL: Auto-end with 8-second buffer
-        const totalDuration = CALL_DURATION_MS + GRACE_PERIOD_MS;
-        console.log(`⏰ Auto-end scheduled in ${durationMin}min + ${GRACE_PERIOD_MS/1000}s grace`);
         
-        autoEndTimerRef.current = window.setTimeout(() => {
-          console.log("⏰ Call duration reached");
-          cleanup();
-        }, totalDuration);
 
         // Notify backend
         const userId = localStorage.getItem("userId");
@@ -359,20 +352,38 @@ const CallRoom: React.FC = () => {
 
     init();
 
-    const handleCallEnded = () => {
-      console.log("📞 Call ended by server");
-      cleanup();
-    };
 
-    socket?.on("call:ended", handleCallEnded);
+    // ✅ Synced timer start from server event
+const handleCallStart = (data: any) => {
+  if (!startTimeRef.current) {
+    console.log("⏱️ Synced call start received from server");
+    startTimeRef.current = Date.now();
+    timerRef.current = window.setInterval(() => {
+      setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    setJoined(true);
+  }
+};
+socket?.on("call:start", handleCallStart);
 
-    return () => {
-      mounted = false;
-      socket?.off("call:ended", handleCallEnded);
-      if (!cleanupDoneRef.current && !isCleaningUpRef.current) {
-        cleanup();
-      }
-    };
+
+    // ✅ Handle call ended
+const handleCallEnded = () => {
+  console.log("📞 Call ended by server");
+  cleanup();
+};
+
+socket?.on("call:ended", handleCallEnded);
+
+// ✅ Cleanup when unmounting or effect re-runs
+return () => {
+  mounted = false;
+  socket?.off("call:start", handleCallStart);   
+  socket?.off("call:ended", handleCallEnded);
+  if (!cleanupDoneRef.current && !isCleaningUpRef.current) {
+    cleanup();
+  }
+};
   }, [accepted, channelName]);
 
   // Socket events
