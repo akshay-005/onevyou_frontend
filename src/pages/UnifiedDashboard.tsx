@@ -62,6 +62,12 @@ import CallHistory from "@/components/CallHistory";
 import TeacherCard from "@/components/TeacherCard";
 import { clearUserSession } from "@/utils/storage";
 import { disconnectSocket } from "@/utils/socket";
+import {
+  Instagram,
+  Facebook,
+  MessageCircle,
+  Linkedin,
+} from "lucide-react";
 
 const UnifiedDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -291,6 +297,34 @@ const handleOnlineToggle = (checked: boolean) => {
     return;
   }
 
+  // ✅ Share on social media including Instagram
+const shareOnSocial = (platform: string) => {
+  const message =
+    "I'm online and available for calls on ONEVYOU! Connect with me now: ";
+  const encodedMessage = encodeURIComponent(message);
+  const encodedUrl = encodeURIComponent(shareLink);
+
+  const urls: Record<string, string> = {
+    twitter: `https://twitter.com/intent/tweet?text=${encodedMessage}&url=${encodedUrl}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedMessage}`,
+    whatsapp: `https://wa.me/?text=${encodedMessage}%20${encodedUrl}`,
+    instagram: `https://www.instagram.com/`, // Instagram doesn't support direct sharing
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
+  };
+
+  if (platform === "instagram") {
+    // For Instagram, copy link and show message
+    copyToClipboard(shareLink);
+    toast({
+      title: "Link Copied!",
+      description: "Share this link in your Instagram bio or story.",
+    });
+    return;
+  }
+
+  if (urls[platform]) window.open(urls[platform], "_blank");
+};
+
   
 
 
@@ -311,14 +345,23 @@ const handleOnlineToggle = (checked: boolean) => {
 
 
   if (checked) {
-    toast({ title: "You're now Online" });
-    // ✅ Fetch fresh online users after going online
-    setTimeout(() => fetchOnlineUsers(), 200);
-  } else {
-    toast({ title: "You're now Offline" });
-    // ✅ Clear users list when offline
-    setUsers([]);
-  }
+  toast({ title: "You're now Online" });
+  
+  // ✅ Generate share link
+  const baseUrl = window.location.origin;
+  const link = `${baseUrl}/profile/${currentUser?._id}`;
+  setShareLink(link);
+  
+  // ✅ Show share dialog automatically
+  setTimeout(() => setShowShareDialog(true), 500);
+  
+  // ✅ Fetch fresh online users after going online
+  setTimeout(() => fetchOnlineUsers(), 200);
+} else {
+  toast({ title: "You're now Offline" });
+  setUsers([]);
+  setShowShareDialog(false);
+}
 
   // ✅ Reset the ref after a short delay to allow state sync
   setTimeout(() => {
@@ -327,7 +370,7 @@ const handleOnlineToggle = (checked: boolean) => {
   }, 1000);
 };
 
-// Add these functions to UnifiedDashboard.tsx right after handleOnlineToggle
+
 
 // ✅ Payment complete → emit call request
 const onPaymentComplete = (payload: {
@@ -482,11 +525,19 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Online toggle */}
-            <div className="flex items-center gap-3">
-              <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
-              <Label>{isOnline ? "Online" : "Offline"}</Label>
-            </div>
+           {/* Online toggle with green blink indicator */}
+<div className="flex items-center gap-3">
+  <div className="relative flex items-center gap-2">
+    <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
+    {isOnline && (
+      <div className="relative w-3 h-3">
+        <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
+        <div className="absolute inset-1 bg-green-400 rounded-full"></div>
+      </div>
+    )}
+  </div>
+  <Label>{isOnline ? "Online" : "Offline"}</Label>
+</div>
 
             {/* Notifications */}
             <Button
@@ -725,27 +776,100 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Share2 className="h-5 w-5" /> Share Connect Link
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="flex gap-2">
-              <Input value={shareLink} readOnly />
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => copyToClipboard(shareLink)}
-              >
-                <Copy />
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* ✅ IMPROVED: Share Dialog with Instagram and other platforms */}
+<Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+  <DialogContent className="sm:max-w-lg">
+    <DialogHeader>
+      <DialogTitle className="flex items-center gap-2">
+        <Share2 className="h-5 w-5" /> You're Now Online!
+      </DialogTitle>
+      <DialogDescription>
+        Share your link on social media to let people know you're available for calls
+      </DialogDescription>
+    </DialogHeader>
+    <div className="space-y-6 py-4">
+      {/* Share Link */}
+      <div>
+        <Label className="text-sm font-medium mb-2 block">Your Share Link</Label>
+        <div className="flex gap-2">
+          <Input 
+            value={shareLink} 
+            readOnly 
+            className="font-mono text-sm"
+          />
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => copyToClipboard(shareLink)}
+            title="Copy to clipboard"
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Share on Social Media */}
+      <div>
+        <Label className="text-sm font-medium mb-3 block">Share on Social Media</Label>
+        <div className="grid grid-cols-2 gap-3">
+          <Button
+            variant="outline"
+            className="w-full flex items-center justify-center gap-2"
+            onClick={() => shareOnSocial("twitter")}
+          >
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2s9 5 20 5a9.5 9.5 0 00-9-5.5c4.75 2.25 7-7 7-7" />
+            </svg>
+            Twitter
+          </Button>
+
+          <Button
+            variant="outline"
+            className="w-full flex items-center justify-center gap-2"
+            onClick={() => shareOnSocial("facebook")}
+          >
+            <Facebook className="h-4 w-4" />
+            Facebook
+          </Button>
+
+          <Button
+            variant="outline"
+            className="w-full flex items-center justify-center gap-2"
+            onClick={() => shareOnSocial("whatsapp")}
+          >
+            <MessageCircle className="h-4 w-4" />
+            WhatsApp
+          </Button>
+
+          <Button
+            variant="outline"
+            className="w-full flex items-center justify-center gap-2"
+            onClick={() => shareOnSocial("instagram")}
+          >
+            <Instagram className="h-4 w-4" />
+            Instagram
+          </Button>
+
+          <Button
+            variant="outline"
+            className="w-full flex items-center justify-center gap-2"
+            onClick={() => shareOnSocial("linkedin")}
+          >
+            <Linkedin className="h-4 w-4" />
+            LinkedIn
+          </Button>
+        </div>
+      </div>
+
+      {/* Info Box */}
+      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+        <p className="text-sm text-blue-900 dark:text-blue-100">
+          Your link is active while you're online. When someone clicks your link, they'll be able to request a call with you instantly.
+        </p>
+      </div>
+    </div>
+  </DialogContent>
+</Dialog>
 
       {selectedTeacher && (
         <PricingModal
