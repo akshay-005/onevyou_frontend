@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock, IndianRupee, User } from "lucide-react";
+import { Clock, IndianRupee } from "lucide-react";
 import { getAuthToken, getUserId } from "@/utils/storage";
 import { useSocket } from "@/utils/socket";
 
@@ -59,37 +59,33 @@ export default function CallHistory() {
 
   if (loading) {
     return (
-      <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
+      <div className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
         <Clock className="h-10 w-10 mb-3 animate-spin text-primary" />
-        <p className="font-medium">Loading Call History...</p>
-      </Card>
+        <p className="font-medium">Loading Recent Calls...</p>
+      </div>
     );
   }
 
   if (!calls.length) {
     return (
-      <Card className="rounded-2xl shadow-lg border border-gray-200 bg-white">
-        <CardHeader className="border-b">
-          <CardTitle className="text-lg font-semibold">Call History</CardTitle>
-        </CardHeader>
-        <CardContent className="py-4 text-sm text-muted-foreground">
-          No previous calls found.
-        </CardContent>
-      </Card>
+      <div className="rounded-2xl shadow-lg border border-gray-200 bg-white p-4 text-center text-sm text-muted-foreground">
+        No previous calls found.
+      </div>
     );
   }
 
   return (
-    <Card className="rounded-2xl shadow-lg border border-gray-200 bg-white overflow-hidden">
-      {/* Fixed header with subtle bottom shadow */}
-      <CardHeader className="sticky top-0 bg-white z-10 border-b shadow-sm">
-        <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-          <Clock className="h-5 w-5 text-primary" /> Recent Calls
+    <Card className="rounded-2xl shadow-xl border border-gray-200 bg-white overflow-hidden">
+      {/* Fixed Header */}
+      <CardHeader className="sticky top-0 bg-white/90 backdrop-blur-sm border-b flex items-center gap-2 px-5 py-3">
+        <Clock className="h-5 w-5 text-primary" />
+        <CardTitle className="text-base font-semibold text-gray-800">
+          Recent Calls
         </CardTitle>
       </CardHeader>
 
-      {/* Scrollable content */}
-      <CardContent className="space-y-4 py-4 max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+      {/* Scrollable List */}
+      <CardContent className="divide-y divide-gray-100 max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
         {calls.map((call) => {
           const currentUserId = getUserId();
           const isOutgoing = call.caller?._id === currentUserId;
@@ -101,14 +97,13 @@ export default function CallHistory() {
           return (
             <div
               key={call._id}
-              className="flex items-center justify-between border border-gray-100 bg-white rounded-xl shadow-sm px-4 py-3 hover:shadow-md hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100 transition"
+              className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition"
             >
               {/* Left side */}
               <div className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white font-medium">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white flex items-center justify-center font-medium">
                   {otherUser?.[0]?.toUpperCase() || "U"}
                 </div>
-
                 <div>
                   <p className="font-medium text-gray-900 flex items-center gap-2">
                     {otherUser || "Unknown"}
@@ -129,7 +124,7 @@ export default function CallHistory() {
               </div>
 
               {/* Right side */}
-              <div className="text-right">
+              <div className="text-right min-w-[60px]">
                 <p className="text-sm text-gray-800 flex items-center justify-end gap-1">
                   <IndianRupee className="h-3 w-3" /> {call.price || 0}
                 </p>
