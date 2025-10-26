@@ -1,9 +1,10 @@
+// src/components/NotificationPanel.tsx
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bell, Phone, Check, X, Clock, IndianRupee, } from "lucide-react";
+import { Bell, Phone, Check, X, Clock, IndianRupee, PlugZap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useSocket } from "@/utils/socket";
@@ -17,57 +18,70 @@ interface ConnectionRequest {
   subject: string;
 }
 
-
-
 const NotificationPanel = () => {
   const { toast } = useToast();
-  const [requests, setRequests] = useState<ConnectionRequest[]>([ ]);
+  const [requests, setRequests] = useState<ConnectionRequest[]>([]);
+  const socket = useSocket(); // ✅ must be at top level
+  const [isSocketReady, setIsSocketReady] = useState(false);
 
   useEffect(() => {
-  const socket = useSocket();
-  if (!socket) return;
+    if (!socket) return;
 
-  socket.on("call:incoming", (data) => {
-    const newRequest = {
-      id: data.callId,
-      studentName: data.callerName || "Unknown",
-      duration: `${data.durationMin || 1} min`,
-      price: data.price || 0,
-      time: "Just now",
-      subject: "Incoming Call",
+    const handleConnect = () => {
+      console.log("✅ Socket connected inside NotificationPanel:", socket.id);
+      setIsSocketReady(true);
     };
-    setRequests((prev) => [newRequest, ...prev]);
-    toast({
-      title: "New Call Request! 📞",
-      description: `${newRequest.studentName} wants to connect.`,
+
+    const handleDisconnect = () => {
+      console.log("⚠️ Socket disconnected");
+      setIsSocketReady(false);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+
+    socket.on("call:incoming", (data) => {
+      const newRequest = {
+        id: data.callId,
+        studentName: data.callerName || "Unknown",
+        duration: `${data.durationMin || 1} min`,
+        price: data.price || 0,
+        time: "Just now",
+        subject: "Incoming Call",
+      };
+      setRequests((prev) => [newRequest, ...prev]);
+      toast({
+        title: "New Call Request! 📞",
+        description: `${newRequest.studentName} wants to connect.`,
+      });
     });
-  });
 
-  socket.on("call:cancelled", ({ callId }) => {
-    setRequests((prev) => prev.filter((r) => r.id !== callId));
-  });
+    socket.on("call:cancelled", ({ callId }) => {
+      setRequests((prev) => prev.filter((r) => r.id !== callId));
+    });
 
-  socket.on("call:timeout", ({ callId }) => {
-    setRequests((prev) => prev.filter((r) => r.id !== callId));
-  });
+    socket.on("call:timeout", ({ callId }) => {
+      setRequests((prev) => prev.filter((r) => r.id !== callId));
+    });
 
-  return () => {
-    socket.off("call:incoming");
-    socket.off("call:cancelled");
-    socket.off("call:timeout");
-  };
-}, []);
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("call:incoming");
+      socket.off("call:cancelled");
+      socket.off("call:timeout");
+    };
+  }, [socket, toast]);
 
   const handleAccept = (request: ConnectionRequest) => {
     toast({
       title: "Call Request Accepted! 📞",
       description: `Starting video call with ${request.studentName}...`,
     });
-    // Simulate video call initiation
     setTimeout(() => {
       window.open("https://meet.google.com", "_blank");
     }, 1000);
-    setRequests(requests.filter(r => r.id !== request.id));
+    setRequests((r) => r.filter((req) => req.id !== request.id));
   };
 
   const handleDecline = (requestId: string) => {
@@ -75,8 +89,21 @@ const NotificationPanel = () => {
       title: "Request Declined",
       description: "The student will be notified",
     });
-    setRequests(requests.filter(r => r.id !== requestId));
+    setRequests((r) => r.filter((req) => req.id !== requestId));
   };
+
+  // 🧩 Show a connecting placeholder if socket isn’t ready
+  if (!socket || !isSocketReady) {
+    return (
+      <Card className="p-6 h-[400px] flex flex-col items-center justify-center text-center text-muted-foreground">
+        <PlugZap className="h-10 w-10 mb-3 animate-spin text-primary" />
+        <p className="font-medium">Connecting to server...</p>
+        <p className="text-sm opacity-75 mt-1">
+          Please wait while we establish a real-time connection.
+        </p>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-4 h-[500px] bg-gradient-to-br from-background to-primary/5">
@@ -102,15 +129,18 @@ const NotificationPanel = () => {
         ) : (
           <div className="space-y-3">
             {requests.map((request) => (
-              <Card 
-                key={request.id} 
+              <Card
+                key={request.id}
                 className="p-4 bg-gradient-to-r from-primary/5 to-accent/5 border-primary/20 hover:scale-[1.02] transition-transform"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-gradient-to-r from-primary to-accent text-white">
-                        {request.studentName.split(' ').map(n => n[0]).join('')}
+                        {request.studentName
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")}
                       </AvatarFallback>
                     </Avatar>
                     <div>
@@ -138,17 +168,17 @@ const NotificationPanel = () => {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:opacity-90"
                     onClick={() => handleAccept(request)}
                   >
                     <Check className="h-4 w-4 mr-1" />
                     Accept
                   </Button>
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
+                  <Button
+                    size="sm"
+                    variant="outline"
                     className="flex-1"
                     onClick={() => handleDecline(request.id)}
                   >

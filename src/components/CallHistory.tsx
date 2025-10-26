@@ -1,12 +1,14 @@
+import { useSocket } from "@/utils/socket";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock, IndianRupee, User } from "lucide-react";
-import { useSocket } from "@/utils/socket";
+import { Clock, IndianRupee, User, PlugZap } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 export default function CallHistory() {
   const [calls, setCalls] = useState<any[]>([]);
+  const socket = useSocket(); // ✅ move here, before any hook
+  const [isSocketReady, setIsSocketReady] = useState(false);
 
   const fetchHistory = async () => {
     try {
@@ -25,22 +27,37 @@ export default function CallHistory() {
   fetchHistory();
   const handleRefresh = () => fetchHistory();
 
-  const socket = useSocket();
-  if (socket) {
-    socket.on("refresh-history", handleRefresh);
-    socket.on("call:ended", handleRefresh);
-  }
+  if (!socket) return;
+
+  const handleConnect = () => setIsSocketReady(true);
+  const handleDisconnect = () => setIsSocketReady(false);
+
+  socket.on("connect", handleConnect);
+  socket.on("disconnect", handleDisconnect);
+  socket.on("refresh-history", handleRefresh);
+  socket.on("call:ended", handleRefresh);
 
   window.addEventListener("refresh-dashboard", handleRefresh);
 
   return () => {
-    if (socket) {
-      socket.off("refresh-history", handleRefresh);
-      socket.off("call:ended", handleRefresh);
-    }
+    socket.off("connect", handleConnect);
+    socket.off("disconnect", handleDisconnect);
+    socket.off("refresh-history", handleRefresh);
+    socket.off("call:ended", handleRefresh);
     window.removeEventListener("refresh-dashboard", handleRefresh);
   };
-}, []);
+}, [socket]);
+
+
+  if (!socket || !isSocketReady) {
+  return (
+    <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
+      <PlugZap className="h-10 w-10 mb-3 animate-spin text-primary" />
+      <p className="font-medium">Connecting to server...</p>
+    </Card>
+  );
+}
+
 
   if (!calls.length)
     return (
