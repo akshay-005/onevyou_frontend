@@ -90,31 +90,41 @@ export default function CallHistory() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 max-h-[400px] overflow-y-auto">
-        {calls.map((call) => (
-          <div
-            key={call._id}
-            className="border rounded-md p-3 flex justify-between items-center hover:bg-muted/50 transition"
-          >
-            <div>
-              <p className="font-medium flex items-center gap-2">
-                <User className="h-4 w-4 text-primary" />
-                {call.callee?.fullName || call.caller?.fullName || "Unknown"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {new Date(call.createdAt).toLocaleString()}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-sm flex items-center justify-end gap-1">
-                <IndianRupee className="h-3 w-3" /> {call.price || 0}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {call.durationSec ? Math.round(call.durationSec / 60) : 0} min
-              </p>
-            </div>
-          </div>
-        ))}
-      </CardContent>
+  {calls.map((call) => {
+    const currentUserId = getAuthToken();
+    const isOutgoing = call.caller?._id === currentUserId;
+    const otherUser =
+      isOutgoing ? call.callee?.fullName : call.caller?.fullName;
+    const direction = isOutgoing ? "Outgoing" : "Incoming";
+
+    return (
+      <div
+        key={call._id}
+        className="border rounded-md p-3 flex justify-between items-center hover:bg-muted/50 transition"
+      >
+        <div>
+          <p className="font-medium flex items-center gap-2">
+            <User className="h-4 w-4 text-primary" />
+            {otherUser || "Unknown"}
+          </p>
+
+          <p className="text-xs text-muted-foreground">
+            {direction} • {new Date(call.createdAt).toLocaleString()}
+          </p>
+        </div>
+
+        <div className="text-right">
+          <p className="text-sm flex items-center justify-end gap-1">
+            <IndianRupee className="h-3 w-3" /> {call.price || 0}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {call.durationSec ? Math.round(call.durationSec / 60) : 0} min
+          </p>
+        </div>
+      </div>
+    );
+  })}
+</CardContent>
     </Card>
   );
 }
