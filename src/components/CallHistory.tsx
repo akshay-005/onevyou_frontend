@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clock, IndianRupee } from "lucide-react";
 import { getAuthToken, getUserId } from "@/utils/storage";
 import { useSocket } from "@/utils/socket";
@@ -75,17 +74,15 @@ export default function CallHistory() {
   }
 
   return (
-    <Card className="rounded-2xl shadow-xl border border-gray-200 bg-white overflow-hidden">
-      {/* Fixed Header */}
-      <CardHeader className="sticky top-0 bg-white/90 backdrop-blur-sm border-b flex items-center gap-2 px-5 py-3">
+    <div className="rounded-2xl border border-gray-100 bg-white shadow-md overflow-hidden">
+      {/* ✅ Only "Recent Calls" header */}
+      <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b flex items-center justify-center gap-2 py-3 font-semibold text-gray-800">
         <Clock className="h-5 w-5 text-primary" />
-        <CardTitle className="text-base font-semibold text-gray-800">
-          Recent Calls
-        </CardTitle>
-      </CardHeader>
+        <span>Recent Calls</span>
+      </div>
 
-      {/* Scrollable List */}
-      <CardContent className="divide-y divide-gray-100 max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+      {/* ✅ Scrollable content */}
+      <div className="max-h-[400px] overflow-y-auto divide-y divide-gray-100 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
         {calls.map((call) => {
           const currentUserId = getUserId();
           const isOutgoing = call.caller?._id === currentUserId;
@@ -99,7 +96,7 @@ export default function CallHistory() {
               key={call._id}
               className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition"
             >
-              {/* Left side */}
+              {/* Left section */}
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white flex items-center justify-center font-medium">
                   {otherUser?.[0]?.toUpperCase() || "U"}
@@ -123,7 +120,7 @@ export default function CallHistory() {
                 </div>
               </div>
 
-              {/* Right side */}
+              {/* Right section */}
               <div className="text-right min-w-[60px]">
                 <p className="text-sm text-gray-800 flex items-center justify-end gap-1">
                   <IndianRupee className="h-3 w-3" /> {call.price || 0}
@@ -135,7 +132,7 @@ export default function CallHistory() {
             </div>
           );
         })}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
