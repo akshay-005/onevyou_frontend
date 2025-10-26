@@ -7,59 +7,74 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 export default function CallHistory() {
   const [calls, setCalls] = useState<any[]>([]);
-  const socket = useSocket(); // ✅ move here, before any hook
+  const socket = useSocket();
   const [isSocketReady, setIsSocketReady] = useState(false);
 
+  // ✅ Fetch call history from backend
   const fetchHistory = async () => {
     try {
       const token = localStorage.getItem("userToken");
+      if (!token) return;
       const res = await fetch(`${API_BASE}/api/calls/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
       setCalls(json.calls || []);
     } catch (err) {
-      console.error("Call history fetch error:", err);
+      console.error("❌ Call history fetch error:", err);
     }
   };
 
+  // ✅ Track socket connection status
   useEffect(() => {
-  fetchHistory();
-  const handleRefresh = () => fetchHistory();
+    if (!socket) return;
 
-  if (!socket) return;
+    const handleConnect = () => {
+      console.log("✅ Socket connected (CallHistory)");
+      setIsSocketReady(true);
+    };
+    const handleDisconnect = () => {
+      console.log("⚠️ Socket disconnected (CallHistory)");
+      setIsSocketReady(false);
+    };
 
-  const handleConnect = () => setIsSocketReady(true);
-  const handleDisconnect = () => setIsSocketReady(false);
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
 
-  socket.on("connect", handleConnect);
-  socket.on("disconnect", handleDisconnect);
-  socket.on("refresh-history", handleRefresh);
-  socket.on("call:ended", handleRefresh);
+    // Listen for updates from server
+    socket.on("refresh-history", fetchHistory);
+    socket.on("call:ended", fetchHistory);
 
-  window.addEventListener("refresh-dashboard", handleRefresh);
+    // Initial fetch
+    fetchHistory();
 
-  return () => {
-    socket.off("connect", handleConnect);
-    socket.off("disconnect", handleDisconnect);
-    socket.off("refresh-history", handleRefresh);
-    socket.off("call:ended", handleRefresh);
-    window.removeEventListener("refresh-dashboard", handleRefresh);
-  };
-}, [socket]);
+    // Cleanup
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("refresh-history", fetchHistory);
+      socket.off("call:ended", fetchHistory);
+    };
+  }, [socket]);
 
+  // ✅ Also allow manual refresh via window event
+  useEffect(() => {
+    window.addEventListener("refresh-dashboard", fetchHistory);
+    return () => window.removeEventListener("refresh-dashboard", fetchHistory);
+  }, []);
 
+  // 🧩 UI while socket connecting
   if (!socket || !isSocketReady) {
-  return (
-    <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
-      <PlugZap className="h-10 w-10 mb-3 animate-spin text-primary" />
-      <p className="font-medium">Connecting to server...</p>
-    </Card>
-  );
-}
+    return (
+      <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
+        <PlugZap className="h-10 w-10 mb-3 animate-spin text-primary" />
+        <p className="font-medium">Connecting to server...</p>
+      </Card>
+    );
+  }
 
-
-  if (!calls.length)
+  // 🧩 Show empty message if no calls found
+  if (!calls.length) {
     return (
       <Card>
         <CardHeader>
@@ -72,7 +87,9 @@ export default function CallHistory() {
         </CardContent>
       </Card>
     );
+  }
 
+  // 🧩 Show list of calls
   return (
     <Card className="shadow-md">
       <CardHeader>
