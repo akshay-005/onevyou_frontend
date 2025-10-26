@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clock, IndianRupee, User } from "lucide-react";
+import { useSocket } from "@/utils/socket";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
@@ -21,13 +22,25 @@ export default function CallHistory() {
   };
 
   useEffect(() => {
-    fetchHistory();
+  fetchHistory();
+  const handleRefresh = () => fetchHistory();
 
-    // 🔁 Auto-refresh when "refresh-dashboard" event is fired
-    const handleRefresh = () => fetchHistory();
-    window.addEventListener("refresh-dashboard", handleRefresh);
-    return () => window.removeEventListener("refresh-dashboard", handleRefresh);
-  }, []);
+  const socket = useSocket();
+  if (socket) {
+    socket.on("refresh-history", handleRefresh);
+    socket.on("call:ended", handleRefresh);
+  }
+
+  window.addEventListener("refresh-dashboard", handleRefresh);
+
+  return () => {
+    if (socket) {
+      socket.off("refresh-history", handleRefresh);
+      socket.off("call:ended", handleRefresh);
+    }
+    window.removeEventListener("refresh-dashboard", handleRefresh);
+  };
+}, []);
 
   if (!calls.length)
     return (

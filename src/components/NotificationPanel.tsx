@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bell, Phone, Check, X, Clock, IndianRupee, User } from "lucide-react";
+import { Bell, Phone, Check, X, Clock, IndianRupee, } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useSocket } from "@/utils/socket";
 
 interface ConnectionRequest {
   id: string;
@@ -16,34 +17,46 @@ interface ConnectionRequest {
   subject: string;
 }
 
+
+
 const NotificationPanel = () => {
   const { toast } = useToast();
-  const [requests, setRequests] = useState<ConnectionRequest[]>([
-    {
-      id: "1",
-      studentName: "Rahul Kumar",
-      duration: "3 min",
-      price: 99,
-      time: "2 min ago",
-      subject: "React Hooks"
-    },
-    {
-      id: "2",
-      studentName: "Priya Sharma",
-      duration: "5 min",
-      price: 149,
-      time: "5 min ago",
-      subject: "JavaScript Basics"
-    },
-    {
-      id: "3",
-      studentName: "Amit Patel",
-      duration: "2 min",
-      price: 49,
-      time: "10 min ago",
-      subject: "CSS Flexbox"
-    }
-  ]);
+  const [requests, setRequests] = useState<ConnectionRequest[]>([ ]);
+
+  useEffect(() => {
+  const socket = useSocket();
+  if (!socket) return;
+
+  socket.on("call:incoming", (data) => {
+    const newRequest = {
+      id: data.callId,
+      studentName: data.callerName || "Unknown",
+      duration: `${data.durationMin || 1} min`,
+      price: data.price || 0,
+      time: "Just now",
+      subject: "Incoming Call",
+    };
+    setRequests((prev) => [newRequest, ...prev]);
+    toast({
+      title: "New Call Request! 📞",
+      description: `${newRequest.studentName} wants to connect.`,
+    });
+  });
+
+  socket.on("call:cancelled", ({ callId }) => {
+    setRequests((prev) => prev.filter((r) => r.id !== callId));
+  });
+
+  socket.on("call:timeout", ({ callId }) => {
+    setRequests((prev) => prev.filter((r) => r.id !== callId));
+  });
+
+  return () => {
+    socket.off("call:incoming");
+    socket.off("call:cancelled");
+    socket.off("call:timeout");
+  };
+}, []);
 
   const handleAccept = (request: ConnectionRequest) => {
     toast({
