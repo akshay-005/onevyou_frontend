@@ -515,7 +515,7 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
-              src="/lovable-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
+              src="/onevyou-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
               alt="ONEVYOU"
               className="h-9"
             />
