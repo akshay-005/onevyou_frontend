@@ -10,7 +10,6 @@ export default function CallHistory() {
   const socket = useSocket();
   const [isSocketReady, setIsSocketReady] = useState(false);
 
-  // ✅ Fetch call history from backend
   const fetchHistory = async () => {
     try {
       const token = localStorage.getItem("userToken");
@@ -25,7 +24,6 @@ export default function CallHistory() {
     }
   };
 
-  // ✅ Track socket connection status
   useEffect(() => {
     if (!socket) return;
 
@@ -40,15 +38,18 @@ export default function CallHistory() {
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
-
-    // Listen for updates from server
     socket.on("refresh-history", fetchHistory);
     socket.on("call:ended", fetchHistory);
 
-    // Initial fetch
+    // ✅ Key fix: if already connected, mark ready immediately
+    if (socket.connected) {
+      console.log("⚡ Socket already connected, setting isSocketReady = true");
+      setIsSocketReady(true);
+    }
+
+    // Initial load
     fetchHistory();
 
-    // Cleanup
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
@@ -57,13 +58,12 @@ export default function CallHistory() {
     };
   }, [socket]);
 
-  // ✅ Also allow manual refresh via window event
   useEffect(() => {
     window.addEventListener("refresh-dashboard", fetchHistory);
     return () => window.removeEventListener("refresh-dashboard", fetchHistory);
   }, []);
 
-  // 🧩 UI while socket connecting
+  // 🧩 Show connecting only if socket not ready yet
   if (!socket || !isSocketReady) {
     return (
       <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
@@ -73,7 +73,7 @@ export default function CallHistory() {
     );
   }
 
-  // 🧩 Show empty message if no calls found
+  // 🧩 Show empty message if no calls
   if (!calls.length) {
     return (
       <Card>
@@ -89,7 +89,7 @@ export default function CallHistory() {
     );
   }
 
-  // 🧩 Show list of calls
+  // ✅ Show call history
   return (
     <Card className="shadow-md">
       <CardHeader>
