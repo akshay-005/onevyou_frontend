@@ -59,39 +59,37 @@ export default function CallHistory() {
 
   if (loading) {
     return (
-      <div className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
+      <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
         <Clock className="h-10 w-10 mb-3 animate-spin text-primary" />
         <p className="font-medium">Loading Call History...</p>
-      </div>
+      </Card>
     );
   }
 
   if (!calls.length) {
     return (
-      <div className="rounded-2xl bg-white shadow-lg border border-gray-200 max-w-md mx-auto">
-        <CardHeader className="sticky top-0 bg-white/90 backdrop-blur-sm border-b rounded-t-2xl">
-          <CardTitle className="flex items-center gap-2 text-lg font-semibold text-center justify-center">
-            <Clock className="h-5 w-5 text-primary" /> Call History
-          </CardTitle>
+      <Card className="rounded-2xl shadow-lg border border-gray-200 bg-white">
+        <CardHeader className="border-b">
+          <CardTitle className="text-lg font-semibold">Call History</CardTitle>
         </CardHeader>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+        <CardContent className="py-4 text-sm text-muted-foreground">
           No previous calls found.
         </CardContent>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="rounded-2xl bg-white shadow-xl border border-gray-200 max-w-md mx-auto overflow-hidden">
-      {/* Sticky header (like your “Connection Requests”) */}
-      <div className="sticky top-0 bg-white/80 backdrop-blur-sm border-b py-3 px-4 flex items-center justify-center z-10">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-gray-800">
-          <Clock className="h-5 w-5 text-primary" /> Call History
-        </h2>
-      </div>
+    <Card className="rounded-2xl shadow-lg border border-gray-200 bg-white overflow-hidden">
+      {/* Fixed header with subtle bottom shadow */}
+      <CardHeader className="sticky top-0 bg-white z-10 border-b shadow-sm">
+        <CardTitle className="flex items-center gap-2 text-lg font-semibold">
+          <Clock className="h-5 w-5 text-primary" /> Recent Calls
+        </CardTitle>
+      </CardHeader>
 
-      {/* Scrollable area */}
-      <div className="max-h-[420px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent divide-y divide-gray-100">
+      {/* Scrollable content */}
+      <CardContent className="space-y-4 py-4 max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
         {calls.map((call) => {
           const currentUserId = getUserId();
           const isOutgoing = call.caller?._id === currentUserId;
@@ -103,9 +101,9 @@ export default function CallHistory() {
           return (
             <div
               key={call._id}
-              className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition"
+              className="flex items-center justify-between border border-gray-100 bg-white rounded-xl shadow-sm px-4 py-3 hover:shadow-md hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100 transition"
             >
-              {/* Left: avatar + name */}
+              {/* Left side */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white font-medium">
                   {otherUser?.[0]?.toUpperCase() || "U"}
@@ -130,7 +128,7 @@ export default function CallHistory() {
                 </div>
               </div>
 
-              {/* Right: rate + duration */}
+              {/* Right side */}
               <div className="text-right">
                 <p className="text-sm text-gray-800 flex items-center justify-end gap-1">
                   <IndianRupee className="h-3 w-3" /> {call.price || 0}
@@ -142,7 +140,7 @@ export default function CallHistory() {
             </div>
           );
         })}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
