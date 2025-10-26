@@ -1,79 +1,72 @@
-import { useSocket } from "@/utils/socket";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clock, IndianRupee, User, PlugZap } from "lucide-react";
+import { getAuthToken } from "@/utils/storage";
+import { useSocket } from "@/utils/socket";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 export default function CallHistory() {
   const [calls, setCalls] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const socket = useSocket();
-  const [isSocketReady, setIsSocketReady] = useState(false);
 
   const fetchHistory = async () => {
     try {
-      const token = localStorage.getItem("userToken");
-      if (!token) return;
+      const token = getAuthToken();
+
+      if (!token) {
+        console.warn("⚠️ No auth token found in localStorage");
+        setLoading(false);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/calls/history`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       });
+
       const json = await res.json();
+      console.log("📜 Call history response:", json);
       setCalls(json.calls || []);
     } catch (err) {
-      console.error("❌ Call history fetch error:", err);
+      console.error("Call history fetch error:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!socket) return;
-
-    const handleConnect = () => {
-      console.log("✅ Socket connected (CallHistory)");
-      setIsSocketReady(true);
-    };
-    const handleDisconnect = () => {
-      console.log("⚠️ Socket disconnected (CallHistory)");
-      setIsSocketReady(false);
-    };
-
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
-    socket.on("refresh-history", fetchHistory);
-    socket.on("call:ended", fetchHistory);
-
-    // ✅ Key fix: if already connected, mark ready immediately
-    if (socket.connected) {
-      console.log("⚡ Socket already connected, setting isSocketReady = true");
-      setIsSocketReady(true);
-    }
-
-    // Initial load
     fetchHistory();
 
+    const handleRefresh = () => fetchHistory();
+    if (socket) {
+      socket.on("refresh-history", handleRefresh);
+      socket.on("call:ended", handleRefresh);
+    }
+
+    window.addEventListener("refresh-dashboard", handleRefresh);
+
     return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("refresh-history", fetchHistory);
-      socket.off("call:ended", fetchHistory);
+      if (socket) {
+        socket.off("refresh-history", handleRefresh);
+        socket.off("call:ended", handleRefresh);
+      }
+      window.removeEventListener("refresh-dashboard", handleRefresh);
     };
   }, [socket]);
 
-  useEffect(() => {
-    window.addEventListener("refresh-dashboard", fetchHistory);
-    return () => window.removeEventListener("refresh-dashboard", fetchHistory);
-  }, []);
-
-  // 🧩 Show connecting only if socket not ready yet
-  if (!socket || !isSocketReady) {
+  if (loading) {
     return (
       <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
         <PlugZap className="h-10 w-10 mb-3 animate-spin text-primary" />
-        <p className="font-medium">Connecting to server...</p>
+        <p className="font-medium">Loading Call History...</p>
       </Card>
     );
   }
 
-  // 🧩 Show empty message if no calls
   if (!calls.length) {
     return (
       <Card>
@@ -89,7 +82,6 @@ export default function CallHistory() {
     );
   }
 
-  // ✅ Show call history
   return (
     <Card className="shadow-md">
       <CardHeader>
@@ -106,7 +98,7 @@ export default function CallHistory() {
             <div>
               <p className="font-medium flex items-center gap-2">
                 <User className="h-4 w-4 text-primary" />
-                {call.callee?.fullName || "Unknown"}
+                {call.callee?.fullName || call.caller?.fullName || "Unknown"}
               </p>
               <p className="text-xs text-muted-foreground">
                 {new Date(call.createdAt).toLocaleString()}
