@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock, IndianRupee, User, PlugZap } from "lucide-react";
-import { getAuthToken } from "@/utils/storage";
+import { Clock, IndianRupee, User } from "lucide-react";
+import { getAuthToken, getUserId } from "@/utils/storage";
 import { useSocket } from "@/utils/socket";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
@@ -14,9 +14,8 @@ export default function CallHistory() {
   const fetchHistory = async () => {
     try {
       const token = getAuthToken();
-
       if (!token) {
-        console.warn("⚠️ No auth token found in localStorage");
+        console.warn("⚠️ No auth token found");
         setLoading(false);
         return;
       }
@@ -61,7 +60,7 @@ export default function CallHistory() {
   if (loading) {
     return (
       <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground">
-        <PlugZap className="h-10 w-10 mb-3 animate-spin text-primary" />
+        <Clock className="h-10 w-10 mb-3 animate-spin text-primary" />
         <p className="font-medium">Loading Call History...</p>
       </Card>
     );
@@ -69,62 +68,79 @@ export default function CallHistory() {
 
   if (!calls.length) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Call History</CardTitle>
+      <Card className="rounded-2xl shadow-lg border border-gray-200 bg-white">
+        <CardHeader className="border-b">
+          <CardTitle className="text-lg font-semibold">Call History</CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            No previous calls found.
-          </p>
+        <CardContent className="py-4 text-sm text-muted-foreground">
+          No previous calls found.
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card className="shadow-md">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+    <Card className="rounded-2xl shadow-lg border border-gray-200 bg-white overflow-hidden">
+      {/* Fixed header with subtle bottom shadow */}
+      <CardHeader className="sticky top-0 bg-white z-10 border-b shadow-sm">
+        <CardTitle className="flex items-center gap-2 text-lg font-semibold">
           <Clock className="h-5 w-5 text-primary" /> Recent Calls
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 max-h-[400px] overflow-y-auto">
-  {calls.map((call) => {
-    const currentUserId = getAuthToken();
-    const isOutgoing = call.caller?._id === currentUserId;
-    const otherUser =
-      isOutgoing ? call.callee?.fullName : call.caller?.fullName;
-    const direction = isOutgoing ? "Outgoing" : "Incoming";
 
-    return (
-      <div
-        key={call._id}
-        className="border rounded-md p-3 flex justify-between items-center hover:bg-muted/50 transition"
-      >
-        <div>
-          <p className="font-medium flex items-center gap-2">
-            <User className="h-4 w-4 text-primary" />
-            {otherUser || "Unknown"}
-          </p>
+      {/* Scrollable content */}
+      <CardContent className="space-y-4 py-4 max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+        {calls.map((call) => {
+          const currentUserId = getUserId();
+          const isOutgoing = call.caller?._id === currentUserId;
+          const otherUser = isOutgoing
+            ? call.callee?.fullName
+            : call.caller?.fullName;
+          const direction = isOutgoing ? "Outgoing" : "Incoming";
 
-          <p className="text-xs text-muted-foreground">
-            {direction} • {new Date(call.createdAt).toLocaleString()}
-          </p>
-        </div>
+          return (
+            <div
+              key={call._id}
+              className="flex items-center justify-between border border-gray-100 bg-white rounded-xl shadow-sm px-4 py-3 hover:shadow-md hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100 transition"
+            >
+              {/* Left side */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white font-medium">
+                  {otherUser?.[0]?.toUpperCase() || "U"}
+                </div>
 
-        <div className="text-right">
-          <p className="text-sm flex items-center justify-end gap-1">
-            <IndianRupee className="h-3 w-3" /> {call.price || 0}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {call.durationSec ? Math.round(call.durationSec / 60) : 0} min
-          </p>
-        </div>
-      </div>
-    );
-  })}
-</CardContent>
+                <div>
+                  <p className="font-medium text-gray-900 flex items-center gap-2">
+                    {otherUser || "Unknown"}
+                    <span
+                      className={`text-xs px-2 py-[2px] rounded-full ${
+                        isOutgoing
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-green-100 text-green-700"
+                      }`}
+                    >
+                      {direction}
+                    </span>
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {new Date(call.createdAt).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              {/* Right side */}
+              <div className="text-right">
+                <p className="text-sm text-gray-800 flex items-center justify-end gap-1">
+                  <IndianRupee className="h-3 w-3" /> {call.price || 0}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {call.durationSec ? Math.round(call.durationSec / 60) : 0} min
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
     </Card>
   );
 }
