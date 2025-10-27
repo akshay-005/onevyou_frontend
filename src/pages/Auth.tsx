@@ -183,6 +183,7 @@ const Auth = () => {
         const rdata = await rres.json();
         if (rres.ok && rdata.success) {
           storeUserSession(rdata.user, rdata.token);
+          localStorage.setItem("isOnline", "false"); // 🧩 start offline after signup
 
           connectSocket(rdata.token);
           toast({ title: "Welcome!", description: "Account created successfully." });
@@ -260,6 +261,8 @@ const Auth = () => {
 
   // ✅ Save user and token
   storeUserSession(rdata.user, rdata.token);
+  // 🧩 Force toggle OFF initially after signup
+  localStorage.setItem("isOnline", "false");
 
   connectSocket(rdata.token);
   toast({ title: "Welcome!", description: "Account created successfully." });
@@ -306,6 +309,7 @@ const Auth = () => {
 
       if (res.ok && data.success) {
   storeUserSession(data.user, data.token);  // ✅ simplified helper
+  localStorage.setItem("isOnline", "false"); // 🧩 force offline on login
   console.log("✅ User object received:", data.user);
   console.log("✅ Token:", data.token);
 

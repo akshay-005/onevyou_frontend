@@ -32,9 +32,12 @@ const Login: React.FC = () => {
 
       const data = await res.json();
 
-      if (data.success) {
-  // ✅ Use helper that saves both token & userId
+    if (data.success) {
+  // ✅ Save session normally
   storeUserSession(data.user, data.token);
+
+  // 🧩 Reset online toggle to OFF for fresh login
+  localStorage.setItem("isOnline", "false");
 
   if (data.user.profileComplete) navigate("/dashboard");
   else navigate("/profile-setup");
