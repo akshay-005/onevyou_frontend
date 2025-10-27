@@ -87,11 +87,12 @@ const UnifiedDashboard: React.FC = () => {
 
 
   // UI state
-  const [isOnline, setIsOnline] = useState<boolean>(() => {
-  // ✅ Restore from localStorage on load
+ // 🧩 Always start offline by default
+const [isOnline, setIsOnline] = useState<boolean>(() => {
   const saved = localStorage.getItem("isOnline");
-  return saved === "true";
+  return saved === "true" ? true : false; // will still respect saved state
 });
+
 
   const [searchTerm, setSearchTerm] = useState("");
   const [users, setUsers] = useState<any[]>([]);
@@ -139,14 +140,16 @@ useEffect(() => {
       if (!mounted) return;
       if (res?.success) {
         setCurrentUser(res.user);
-        // ✅ Only set toggle if not manually toggled and first time loading
         if (!userManuallyToggled.current && !initialLoadComplete.current) {
+  // 🚫 Always default to offline after login/signup
   const saved = localStorage.getItem("isOnline");
-  const restored = saved === null ? res.user.online : saved === "true";
-  console.log("Initial load: setting isOnline to", restored);
-  setIsOnline(restored);
+  const restored = saved === "true"; // only restore if user explicitly chose ON before
+  const finalState = restored ? true : false; // otherwise stay offline
+  console.log("Initial load: forcing isOnline =", finalState);
+  setIsOnline(finalState);
   initialLoadComplete.current = true;
 }
+
 
       }
     })

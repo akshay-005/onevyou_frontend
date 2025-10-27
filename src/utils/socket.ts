@@ -108,7 +108,8 @@ export const SocketProvider = ({ children }: ProviderProps) => {
 
       // Restore online status from localStorage
       const savedOnlineState = localStorage.getItem("isOnline");
-      const isOnline = savedOnlineState ? JSON.parse(savedOnlineState) : true;
+      const isOnline = savedOnlineState ? JSON.parse(savedOnlineState) : false; // 🧩 default offline
+
 
       if (currentUserId) {
         s.emit("user:status:update", { 
