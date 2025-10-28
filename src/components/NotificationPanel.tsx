@@ -59,7 +59,8 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   
   const newRequest = {
     id: data.callId,
-    studentName: data.callerName || "Unknown",
+   studentName: data.callerName?.trim() || "Unknown",
+
     duration: `${data.durationMin || 1} min`,
     price: data.price || 0,
     time: "Just now",
@@ -221,10 +222,12 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-gradient-to-r from-primary to-accent text-white">
-                        {request.studentName
+                        {(request.studentName || "U")
                           .split(" ")
-                          .map((n) => n[0])
-                          .join("")}
+                           .map((n) => n?.[0] || "")
+                            .join("")
+                            .toUpperCase()}
+
                       </AvatarFallback>
                     </Avatar>
                     <div>
