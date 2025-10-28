@@ -334,11 +334,28 @@ const CallRoom: React.FC = () => {
         
 
         // Notify backend
-        const userId = localStorage.getItem("userId");
-        if (userId) {
-          safeEmit("call:start", { channelName, userId });
-        }
+const userId = localStorage.getItem("userId");
+if (userId) {
+  safeEmit("call:start", { channelName, userId });
+}
 
+// ✅ ADD THIS: Client-side auto-end enforcement
+const duration = durationMin || 1;
+const durationMs = duration * 60 * 1000; // Exact duration
+
+console.log(`⏰ Client: Setting auto-end for ${duration}m`);
+
+const clientAutoEnd = setTimeout(() => {
+  console.log("⏰ Client: Time's up! Ending call...");
+  toast({
+    title: "Call Ended",
+    description: `Your ${duration}-minute call has ended`,
+  });
+  cleanup();
+}, durationMs);
+
+// Store timeout to clear on manual end
+autoEndTimerRef.current = clientAutoEnd;
       } catch (err: any) {
         console.error("❌ Call failed:", err);
         toast({ 
@@ -386,45 +403,43 @@ return () => {
 };
   }, [accepted, channelName]);
 
-  // Socket events
-  useEffect(() => {
-    if (!socket) return;
+ // ✅ Socket events - only for caller/callee state management
+useEffect(() => {
+  if (!socket) return;
 
-    const handleAccepted = () => {
-      console.log("✅ Call accepted");
-      document.querySelectorAll("audio").forEach(a => {
-        a.pause();
-        a.src = "";
-      });
-      setIsConnecting(true);
-      setTimeout(() => {
-        setIsConnecting(false);
-        setAccepted(true);
-      }, 1500);
-    };
+  const handleAccepted = () => {
+    console.log("✅ Call accepted");
+    document.querySelectorAll("audio").forEach(a => {
+      a.pause();
+      a.src = "";
+    });
+    if (role === "caller") {
+      setAccepted(true);
+    }
+  };
 
-    const handleRejected = () => {
-      console.log("❌ Call rejected");
-      toast({ title: "Call Declined", description: "User declined your call" });
-      navigate("/dashboard");
-    };
+  const handleRejected = () => {
+    console.log("❌ Call rejected");
+    toast({ title: "Call Declined", description: "User declined your call" });
+    navigate("/dashboard");
+  };
 
-    const handleCancelled = () => {
-      console.log("🚫 Call cancelled");
-      toast({ title: "Call Cancelled" });
-      navigate("/dashboard");
-    };
+  const handleCancelled = () => {
+    console.log("🚫 Call cancelled");
+    toast({ title: "Call Cancelled" });
+    navigate("/dashboard");
+  };
 
-    socket.on("call:accepted", handleAccepted);
-    socket.on("call:rejected", handleRejected);
-    socket.on("call:cancelled", handleCancelled);
+  socket.on("call:accepted", handleAccepted);
+  socket.on("call:rejected", handleRejected);
+  socket.on("call:cancelled", handleCancelled);
 
-    return () => {
-      socket.off("call:accepted", handleAccepted);
-      socket.off("call:rejected", handleRejected);
-      socket.off("call:cancelled", handleCancelled);
-    };
-  }, [socket, navigate]);
+  return () => {
+    socket.off("call:accepted", handleAccepted);
+    socket.off("call:rejected", handleRejected);
+    socket.off("call:cancelled", handleCancelled);
+  };
+}, [socket, navigate, role]);
 
   // Controls
   const toggleMic = async () => {

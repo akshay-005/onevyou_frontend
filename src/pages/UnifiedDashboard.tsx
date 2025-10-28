@@ -101,7 +101,20 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [onlineCount, setOnlineCount] = useState(0);
   const [pendingRequests, setPendingRequests] = useState(0);
-  const [callRequests, setCallRequests] = useState<any[]>([]); // ✅ ADD THIS LINE
+  const [callRequests, setCallRequests] = useState<any[]>(() => {
+  // ✅ Restore from localStorage on mount
+  try {
+    const saved = localStorage.getItem('pendingCallRequests');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      console.log("🔄 Restored pending requests from localStorage:", parsed);
+      return parsed;
+    }
+  } catch (err) {
+    console.error("Failed to restore pending requests:", err);
+  }
+  return [];
+});
 
   // ✅ NEW: Ref to track if user manually toggled
 
@@ -140,6 +153,7 @@ useEffect(() => {
   let mounted = true;
   api
     .getMe()
+    
     .then((res) => {
       if (!mounted) return;
       if (res?.success) {
@@ -155,6 +169,7 @@ useEffect(() => {
 }
 
 
+
       }
     })
     .catch((err) => {
@@ -166,13 +181,30 @@ useEffect(() => {
   };
 }, []);
 
+// ✅ Sync pending requests count from restored data (SEPARATE useEffect)
+useEffect(() => {
+  if (callRequests.length > 0) {
+    setPendingRequests(callRequests.length);
+    console.log("🔄 Synced pending requests count:", callRequests.length);
+  }
+}, []); // Run once on mount
+
 useEffect(() => {
   const handleRequestHandled = (e: any) => {
     const requestId = e.detail?.requestId;
     console.log("🗑️ Removing request:", requestId);
     
     if (requestId) {
-      setCallRequests(prev => prev.filter(r => r.id !== requestId));
+      setCallRequests(prev => {
+        const updated = prev.filter(r => r.id !== requestId);
+        // ✅ UPDATE localStorage
+        if (updated.length === 0) {
+          localStorage.removeItem('pendingCallRequests');
+        } else {
+          localStorage.setItem('pendingCallRequests', JSON.stringify(updated));
+        }
+        return updated;
+      });
     }
     setPendingRequests(prev => Math.max(0, prev - 1));
   };
@@ -242,32 +274,38 @@ useEffect(() => {
   };
 
  const onIncoming = (payload: any) => {
-    console.log("📞 Dashboard received incoming call:", payload);
-    
-    // ✅ Create full request object
-    const newRequest = {
-      id: payload.callId,
-      studentName: payload.callerName || "Unknown",
-      duration: `${payload.durationMin || 1} min`,
-      price: payload.price || 0,
-      time: "Just now",
-      subject: "Incoming Call",
-      channelName: payload.channelName,
-      fromUserId: payload.fromUserId,
-      durationMin: payload.durationMin || 1,
-    };
-    
-    // ✅ Store in state
-    setCallRequests(prev => [newRequest, ...prev]);
-    setPendingRequests(prev => prev + 1);
-    
-    console.log("✅ Stored request:", newRequest);
-    
-    toast({
-      title: "📞 New Call Request",
-      description: `${payload.callerName || "Someone"} wants to connect`,
-    });
+  console.log("📞 Dashboard received incoming call:", payload);
+  
+  // ✅ Create full request object
+  const newRequest = {
+    id: payload.callId,
+    studentName: payload.callerName || "Unknown",
+    duration: `${payload.durationMin || 1} min`,
+    price: payload.price || 0,
+    time: "Just now",
+    subject: "Incoming Call",
+    channelName: payload.channelName,
+    fromUserId: payload.fromUserId,
+    durationMin: payload.durationMin || 1,
   };
+  
+  // ✅ Store in state
+  setCallRequests(prev => {
+    const updated = [newRequest, ...prev];
+    // ✅ ADD THIS: Save to localStorage
+    localStorage.setItem('pendingCallRequests', JSON.stringify(updated));
+    return updated;
+  });
+  
+  setPendingRequests(prev => prev + 1);
+  
+  console.log("✅ Stored request:", newRequest);
+  
+  toast({
+    title: "📞 New Call Request",
+    description: `${payload.callerName || "Someone"} wants to connect`,
+  });
+};
 
   const onCallResponse = (payload: any) => {
     if (payload.accepted && payload.channelName) {

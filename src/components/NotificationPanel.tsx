@@ -134,7 +134,6 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     detail: { requestId: request.id }
   }));
 
-  // Navigate to call room
 
   // Navigate to call room
   const duration = parseInt(request.duration) || 1;
