@@ -54,7 +54,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSocket } from "@/utils/socket";
 import api from "@/utils/api";
 
-//import IncomingCallModal from "@/components/IncomingCallModal";
+import IncomingCallModal from "@/components/IncomingCallModal";
 import PricingModal from "@/components/PricingModal";
 import NotificationPanel from "@/components/NotificationPanel";
 import EarningsCard from "@/components/EarningsCard";
@@ -101,22 +101,6 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [onlineCount, setOnlineCount] = useState(0);
   const [pendingRequests, setPendingRequests] = useState(0);
-  const [callRequests, setCallRequests] = useState<any[]>(() => {
-  // ✅ Restore from localStorage on mount
-  try {
-    const saved = localStorage.getItem('pendingCallRequests');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      console.log("🔄 Restored pending requests from localStorage:", parsed);
-      return parsed;
-    }
-  } catch (err) {
-    console.error("Failed to restore pending requests:", err);
-  }
-  return [];
-});
-
-  // ✅ NEW: Ref to track if user manually toggled
 
   // ✅ NEW: Ref to track if user manually toggled (prevents auto-sync from overriding manual toggle)
   const userManuallyToggled = useRef(false);
@@ -153,7 +137,6 @@ useEffect(() => {
   let mounted = true;
   api
     .getMe()
-    
     .then((res) => {
       if (!mounted) return;
       if (res?.success) {
@@ -169,7 +152,6 @@ useEffect(() => {
 }
 
 
-
       }
     })
     .catch((err) => {
@@ -181,31 +163,8 @@ useEffect(() => {
   };
 }, []);
 
-// ✅ Sync pending requests count from restored data (SEPARATE useEffect)
 useEffect(() => {
-  if (callRequests.length > 0) {
-    setPendingRequests(callRequests.length);
-    console.log("🔄 Synced pending requests count:", callRequests.length);
-  }
-}, []); // Run once on mount
-
-useEffect(() => {
-  const handleRequestHandled = (e: any) => {
-    const requestId = e.detail?.requestId;
-    console.log("🗑️ Removing request:", requestId);
-    
-    if (requestId) {
-      setCallRequests(prev => {
-        const updated = prev.filter(r => r.id !== requestId);
-        // ✅ UPDATE localStorage
-        if (updated.length === 0) {
-          localStorage.removeItem('pendingCallRequests');
-        } else {
-          localStorage.setItem('pendingCallRequests', JSON.stringify(updated));
-        }
-        return updated;
-      });
-    }
+  const handleRequestHandled = () => {
     setPendingRequests(prev => Math.max(0, prev - 1));
   };
 
@@ -273,18 +232,17 @@ useEffect(() => {
     });
   };
 
- socket.on("call:incoming", (payload) => {
-  console.log("📞 Incoming call (Dashboard badge sync):", payload.callId);
-  const exists = callRequests.find(r => r.id === payload.callId);
-  if (exists) return;
-  setCallRequests(prev => {
-    const updated = [{ ...payload, id: payload.callId }, ...prev];
-    localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
-    return updated;
-  });
-  setPendingRequests(p => p + 1);
-});
-
+ const onIncoming = (payload: any) => {
+    console.log("📞 Dashboard received incoming call:", payload);
+    
+    // ✅ Increment pending requests counter
+    setPendingRequests(prev => prev + 1);
+    
+    toast({
+      title: "📞 New Call Request",
+      description: `${payload.callerName || "Someone"} wants to connect`,
+    });
+  };
 
   const onCallResponse = (payload: any) => {
     if (payload.accepted && payload.channelName) {
@@ -301,7 +259,7 @@ useEffect(() => {
   // Register all listeners
   socket.on("connect", onConnect);
   socket.on("user:status", onUserStatus);
-  //socket.on("call:incoming", onIncoming);
+  socket.on("call:incoming", onIncoming);
   socket.on("call:response", onCallResponse);
 
   // If already connected, call onConnect immediately
@@ -315,7 +273,7 @@ useEffect(() => {
     console.log("Cleaning up socket listeners");
     socket.off("connect", onConnect);
     socket.off("user:status", onUserStatus);
-    //socket.off("call:incoming", onIncoming);
+    socket.off("call:incoming", onIncoming);
     socket.off("call:response", onCallResponse);
   };
 }, [socket]); // ✅ ONLY depend on socket object itself, not socket.connected
@@ -850,9 +808,10 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
         data={incomingCall}
         onClose={() => setShowIncoming(false)}
       />*/}
-<Dialog open={showNotifications} onOpenChange={setShowNotifications}>
+
+      <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent className="sm:max-w-lg p-0">
-          <NotificationPanel requests={callRequests} />
+          <NotificationPanel />
         </DialogContent>
       </Dialog>
 
