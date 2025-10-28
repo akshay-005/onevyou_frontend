@@ -160,25 +160,15 @@ const NotificationPanel = () => {
 
   setRequests((r) => r.filter((req) => req.id !== requestId));
 };
-  // 🧩 Show a connecting placeholder if socket isn’t ready
-  if (!socket || !isSocketReady) {
-    return (
-      <Card className="p-6 h-[400px] flex flex-col items-center justify-center text-center text-muted-foreground">
-        <PlugZap className="h-10 w-10 mb-3 animate-spin text-primary" />
-        <p className="font-medium">Connecting to server...</p>
-        <p className="text-sm opacity-75 mt-1">
-          Please wait while we establish a real-time connection.
-        </p>
-      </Card>
-    );
-  }
+  // Show connecting state inline instead of blocking entire panel
+  const isConnecting = !socket || !isSocketReady;
 
    useEffect(() => {
     console.log("🔍 NotificationPanel - Requests:", requests.length);
     console.log("Socket ready:", isSocketReady);
   }, [requests, isSocketReady]);
 
-  return (
+ return (
     <Card className="p-4 h-[500px] bg-gradient-to-br from-background to-primary/5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold flex items-center gap-2">
@@ -190,6 +180,13 @@ const NotificationPanel = () => {
             </Badge>
           )}
         </h3>
+        {/* ✅ Show connection status as badge instead of blocking */}
+        {isConnecting && (
+          <Badge variant="outline" className="animate-pulse">
+            <PlugZap className="h-3 w-3 mr-1" />
+            Connecting...
+          </Badge>
+        )}
       </div>
 
       <ScrollArea className="h-[420px]">
