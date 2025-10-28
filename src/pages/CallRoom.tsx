@@ -455,6 +455,13 @@ useEffect(() => {
   };
 }, [socket, navigate, role]);
 
+
+useEffect(() => {
+  // Prevent duplicate call:response from outside
+  socket?.off("call:response");
+}, [socket]);
+
+
 // ✅ Cleanup if user closes tab or refreshes
 useEffect(() => {
   const handleBeforeUnload = () => {
@@ -487,7 +494,7 @@ useEffect(() => {
   };
 
   // UI States
-  if (role === "callee" && !accepted) {
+  {/*if (role === "callee" && !accepted) {
     const callId = query.get("callId");
     const callerId = query.get("fromUserId");
 
@@ -555,7 +562,20 @@ useEffect(() => {
         </motion.div>
       </div>
     );
-  }
+  }  */}
+
+
+  if (role === "callee" && !accepted) {
+  // Auto-accept since we already accepted via NotificationPanel
+  console.log("🎬 Callee auto-accepted call (navigated from NotificationPanel)");
+  setAccepted(true);
+  return (
+    <div className="h-screen flex items-center justify-center bg-black text-white">
+      <p>Connecting...</p>
+    </div>
+  );
+}
+
 
   if (role === "caller" && !accepted) {
     return (
