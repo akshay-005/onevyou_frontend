@@ -273,37 +273,17 @@ useEffect(() => {
     });
   };
 
- socket.on("call:incoming", (payload: any) => {
-  console.log("📞 Incoming call event received (Dashboard):", payload.callId);
-  
-  // Only add to badge list if not already added
-  const existing = callRequests.find(r => r.id === payload.callId);
-  if (existing) return;
-
-  const newRequest = {
-    id: payload.callId,
-    studentName: payload.callerName || "Unknown",
-    duration: `${payload.durationMin || 1} min`,
-    price: payload.price || 0,
-    time: "Just now",
-    subject: "Incoming Call",
-    channelName: payload.channelName,
-    fromUserId: payload.fromUserId,
-    durationMin: payload.durationMin || 1,
-  };
-
-  setCallRequests((prev) => {
-    const updated = [newRequest, ...prev];
+ socket.on("call:incoming", (payload) => {
+  console.log("📞 Incoming call (Dashboard badge sync):", payload.callId);
+  const exists = callRequests.find(r => r.id === payload.callId);
+  if (exists) return;
+  setCallRequests(prev => {
+    const updated = [{ ...payload, id: payload.callId }, ...prev];
     localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
     return updated;
   });
-
-  setPendingRequests((prev) => prev + 1);
-
-  // 🔕 Do NOT show modal or ringtone here
-  // NotificationPanel will handle that instead
+  setPendingRequests(p => p + 1);
 });
-
 
 
   const onCallResponse = (payload: any) => {
@@ -335,7 +315,7 @@ useEffect(() => {
     console.log("Cleaning up socket listeners");
     socket.off("connect", onConnect);
     socket.off("user:status", onUserStatus);
-    socket.off("call:incoming", onIncoming);
+    //socket.off("call:incoming", onIncoming);
     socket.off("call:response", onCallResponse);
   };
 }, [socket]); // ✅ ONLY depend on socket object itself, not socket.connected
