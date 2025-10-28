@@ -16,6 +16,9 @@ interface ConnectionRequest {
   price: number;
   time: string;
   subject: string;
+  channelName?: string;        // ✅ ADD THIS
+  fromUserId?: string;         // ✅ ADD THIS
+  durationMin?: number;        // ✅ ADD THIS
 }
 
 const NotificationPanel = () => {
@@ -40,21 +43,33 @@ const NotificationPanel = () => {
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
 
-    socket.on("call:incoming", (data) => {
-      const newRequest = {
-        id: data.callId,
-        studentName: data.callerName || "Unknown",
-        duration: `${data.durationMin || 1} min`,
-        price: data.price || 0,
-        time: "Just now",
-        subject: "Incoming Call",
-      };
-      setRequests((prev) => [newRequest, ...prev]);
-      toast({
-        title: "New Call Request! 📞",
-        description: `${newRequest.studentName} wants to connect.`,
-      });
-    });
+   socket.on("call:incoming", (data) => {
+  console.log("📞 Incoming call data:", data);
+  
+  const newRequest = {
+    id: data.callId,
+    studentName: data.callerName || "Unknown",
+    duration: `${data.durationMin || 1} min`,
+    price: data.price || 0,
+    time: "Just now",
+    subject: "Incoming Call",
+    channelName: data.channelName,           // ✅ STORE THIS
+    fromUserId: data.fromUserId,             // ✅ STORE THIS
+    durationMin: data.durationMin || 1,      // ✅ STORE THIS
+  };
+  
+  setRequests((prev) => [newRequest, ...prev]);
+  
+  // Play incoming sound
+  const audio = new Audio("/sounds/incoming.mp3");
+  audio.loop = true;
+  audio.play().catch(() => {});
+  
+  toast({
+    title: "New Call Request! 📞",
+    description: `${newRequest.studentName} wants to connect.`,
+  });
+});
 
     socket.on("call:cancelled", ({ callId }) => {
       setRequests((prev) => prev.filter((r) => r.id !== callId));
@@ -73,25 +88,70 @@ const NotificationPanel = () => {
     };
   }, [socket, toast]);
 
-  const handleAccept = (request: ConnectionRequest) => {
-    toast({
-      title: "Call Request Accepted! 📞",
-      description: `Starting video call with ${request.studentName}...`,
-    });
-    setTimeout(() => {
-      window.open("https://meet.google.com", "_blank");
-    }, 1000);
-    setRequests((r) => r.filter((req) => req.id !== request.id));
-  };
+ const handleAccept = (request: ConnectionRequest) => {
+  if (!socket) return;
+
+  // Stop any ringtones
+  document.querySelectorAll("audio").forEach(a => {
+    a.pause();
+    a.src = "";
+  });
+
+  // Get stored call data from request
+  const callData = requests.find(r => r.id === request.id);
+  if (!callData) return;
+
+  // Notify backend
+  socket.emit("call:response", {
+    toUserId: callData.fromUserId,
+    accepted: true,
+    channelName: callData.channelName,
+    callId: request.id,
+  });
+
+  toast({
+    title: "Call Request Accepted! 📞",
+    description: `Starting video call with ${request.studentName}...`,
+  });
+
+  // Remove from notifications
+  setRequests((r) => r.filter((req) => req.id !== request.id));
+
+  // Navigate to call room
+  const duration = parseInt(request.duration) || 1;
+  setTimeout(() => {
+    window.location.href = `/call/${callData.channelName}?role=callee&callId=${request.id}&fromUserId=${callData.fromUserId}&duration=${duration}`;
+  }, 500);
+};
 
   const handleDecline = (requestId: string) => {
-    toast({
-      title: "Request Declined",
-      description: "The student will be notified",
-    });
-    setRequests((r) => r.filter((req) => req.id !== requestId));
-  };
+  if (!socket) return;
 
+  const request = requests.find(r => r.id === requestId);
+  if (!request) return;
+
+  // Stop ringtones
+  document.querySelectorAll("audio").forEach(a => {
+    a.pause();
+    a.src = "";
+  });
+
+  // Notify backend
+  socket.emit("call:response", {
+    toUserId: request.fromUserId,
+    accepted: false,
+    channelName: request.channelName,
+    callId: requestId,
+  });
+
+  toast({
+    title: "Request Declined",
+    description: "The caller will be notified",
+    variant: "destructive",
+  });
+
+  setRequests((r) => r.filter((req) => req.id !== requestId));
+};
   // 🧩 Show a connecting placeholder if socket isn’t ready
   if (!socket || !isSocketReady) {
     return (

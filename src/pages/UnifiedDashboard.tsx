@@ -96,8 +96,8 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [users, setUsers] = useState<any[]>([]);
-  const [incomingCall, setIncomingCall] = useState<any | null>(null);
-  const [showIncoming, setShowIncoming] = useState(false);
+  //const [incomingCall, setIncomingCall] = useState<any | null>(null);
+  //const [showIncoming, setShowIncoming] = useState(false);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [onlineCount, setOnlineCount] = useState(0);
 
@@ -225,21 +225,15 @@ useEffect(() => {
   const onIncoming = (payload: any) => {
   console.log("📞 Incoming call from", payload.callerName, payload);
 
-  // 🧩 Play incoming ringtone
-  const audio = new Audio("/sounds/incoming.mp3");
-  audio.loop = true;
-  audio.play().catch(() => {});
+  // ✅ Don't auto-navigate - let NotificationPanel handle it
+  // Just show notification toast
+  toast({
+    title: "📞 New Call Request",
+    description: `${payload.callerName || "Someone"} wants to connect`,
+  });
 
-  // Option 1 — directly auto-navigate to CallRoom
-  navigate(
-    `/call/${payload.channelName}?role=callee&callId=${payload.callId}&fromUserId=${payload.fromUserId}&duration=${payload.durationMin || 1}`
-  );
-
-  // Option 2 (optional, if you use a modal):
-  // setIncomingCall(payload);
-  // setShowIncoming(true);
+  // ✅ The call will appear in NotificationPanel automatically via socket event
 };
-
 
 
   const onCallResponse = (payload: any) => {
@@ -767,11 +761,11 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
       </main>
 
       {/* Modals */}
-      <IncomingCallModal
+      {/*<IncomingCallModal
         open={showIncoming}
         data={incomingCall}
         onClose={() => setShowIncoming(false)}
-      />
+      />*/}
 
       <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent className="sm:max-w-lg p-0">
