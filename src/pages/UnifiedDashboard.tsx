@@ -274,9 +274,15 @@ useEffect(() => {
   };
 
  const onIncoming = (payload: any) => {
-  console.log("📞 Dashboard received incoming call:", payload);
-  
-  // ✅ Create full request object
+  console.log("📞 Incoming call (Dashboard, silent sync):", payload);
+
+  // ✅ Avoid duplicate — already handled by NotificationPanel
+  const existing = callRequests.find((r) => r.id === payload.callId);
+  if (existing) {
+    console.log("🟡 Duplicate incoming detected, skipping...");
+    return;
+  }
+
   const newRequest = {
     id: payload.callId,
     studentName: payload.callerName || "Unknown",
@@ -288,24 +294,17 @@ useEffect(() => {
     fromUserId: payload.fromUserId,
     durationMin: payload.durationMin || 1,
   };
-  
-  // ✅ Store in state
-  setCallRequests(prev => {
+
+  // ✅ Update state + localStorage only (no ringtone or toast)
+  setCallRequests((prev) => {
     const updated = [newRequest, ...prev];
-    // ✅ ADD THIS: Save to localStorage
-    localStorage.setItem('pendingCallRequests', JSON.stringify(updated));
+    localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
     return updated;
   });
-  
-  setPendingRequests(prev => prev + 1);
-  
-  console.log("✅ Stored request:", newRequest);
-  
-  toast({
-    title: "📞 New Call Request",
-    description: `${payload.callerName || "Someone"} wants to connect`,
-  });
+
+  setPendingRequests((prev) => prev + 1);
 };
+
 
   const onCallResponse = (payload: any) => {
     if (payload.accepted && payload.channelName) {
