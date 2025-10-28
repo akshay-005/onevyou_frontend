@@ -189,35 +189,32 @@ const PricingModal = ({
         order_id: order.id,
         
         // 🧠 This runs automatically when payment succeeds
-        handler: async function (response: any) {
-          try {
-            const verifyRes = await api.verifyPayment(response);
-            if (verifyRes.success) {
-              toast({
-                title: "Payment Successful!",
-                description: "Starting your video call...",
-              });
-              onPaymentComplete({
-                teacherId: teacher.id || teacher._id || teacher.name,
-                minutes,
-                price,
-              });
-            } else {
-              toast({
-                title: "Payment Verification Failed",
-                description: "Please try again.",
-                variant: "destructive",
-              });
-            }
-          } catch (err) {
-            console.error("Payment verification error:", err);
-            toast({
-              title: "Verification Error",
-              description: "Could not verify payment",
-              variant: "destructive",
-            });
-          }
-        },
+        if (verifyRes.success) {
+  toast({
+    title: "Payment Successful!",
+    description: "Starting your video call...",
+  });
+
+  // ✅ Trigger call creation on backend (notify the callee)
+  const sessionRes = await api.createCallSession({
+    teacherId: teacher.id || teacher._id,
+    durationMin: minutes,
+    price,
+  });
+
+  if (!sessionRes.success || !sessionRes.channelName) {
+    toast({
+      title: "Error",
+      description: "Failed to start call session.",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  // ✅ Navigate caller directly into call room
+  window.location.href = `/call/${sessionRes.channelName}?role=caller&duration=${minutes}`;
+}
+
 
         // ✅ Real user data
         prefill: {

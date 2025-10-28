@@ -102,10 +102,11 @@ const CallRoom: React.FC = () => {
       : 0;
 
     // Notify backend
-    const userId = localStorage.getItem("userId");
-    if (userId && channelName) {
-      safeEmit("call:end", { channelName, durationSec: elapsed, userId });
-    }
+const userId = localStorage.getItem("userId");
+if (userId && channelName) {
+  await safeEmit("call:end", { channelName, durationSec: elapsed, userId });
+}
+
 
     // Stop all audio
     document.querySelectorAll("audio").forEach(audio => {
@@ -333,20 +334,22 @@ const CallRoom: React.FC = () => {
 
         if (!mounted) return;
 
-        // Start timer
-        {/*startTimeRef.current = Date.now();
-        timerRef.current = window.setInterval(() => {
-          setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
-        }, 1000);
+        // Start local timer immediately
+startTimeRef.current = Date.now();
+timerRef.current = window.setInterval(() => {
+  setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
+}, 1000);
 
-        setJoined(true);*/}
+setJoined(true);
+
 
         
 
         // Notify backend
 const userId = localStorage.getItem("userId");
 if (userId) {
-  safeEmit("call:start", { channelName, userId });
+ safeEmit("call:start", { channelName, userId, role });
+
 }
 
 // ✅ ADD THIS: Client-side auto-end enforcement
@@ -411,7 +414,8 @@ return () => {
     cleanup();
   }
 };
-  }, [accepted, channelName]);
+  }, [accepted, channelName, socket]);
+
 
  // ✅ Socket events - only for caller/callee state management
 useEffect(() => {
@@ -451,6 +455,16 @@ useEffect(() => {
   };
 }, [socket, navigate, role]);
 
+// ✅ Cleanup if user closes tab or refreshes
+useEffect(() => {
+  const handleBeforeUnload = () => {
+    cleanup();
+  };
+  window.addEventListener("beforeunload", handleBeforeUnload);
+  return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+}, []);
+
+
   // Controls
   const toggleMic = async () => {
     if (localAudioRef.current) {
@@ -476,6 +490,8 @@ useEffect(() => {
   if (role === "callee" && !accepted) {
     const callId = query.get("callId");
     const callerId = query.get("fromUserId");
+
+    
 
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white text-center px-4">
