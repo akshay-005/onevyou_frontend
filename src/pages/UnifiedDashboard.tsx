@@ -273,15 +273,12 @@ useEffect(() => {
     });
   };
 
- const onIncoming = (payload: any) => {
-  console.log("📞 Incoming call (Dashboard, silent sync):", payload);
-
-  // ✅ Avoid duplicate — already handled by NotificationPanel
-  const existing = callRequests.find((r) => r.id === payload.callId);
-  if (existing) {
-    console.log("🟡 Duplicate incoming detected, skipping...");
-    return;
-  }
+ socket.on("call:incoming", (payload: any) => {
+  console.log("📞 Incoming call event received (Dashboard):", payload.callId);
+  
+  // Only add to badge list if not already added
+  const existing = callRequests.find(r => r.id === payload.callId);
+  if (existing) return;
 
   const newRequest = {
     id: payload.callId,
@@ -295,7 +292,6 @@ useEffect(() => {
     durationMin: payload.durationMin || 1,
   };
 
-  // ✅ Update state + localStorage only (no ringtone or toast)
   setCallRequests((prev) => {
     const updated = [newRequest, ...prev];
     localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
@@ -303,7 +299,11 @@ useEffect(() => {
   });
 
   setPendingRequests((prev) => prev + 1);
-};
+
+  // 🔕 Do NOT show modal or ringtone here
+  // NotificationPanel will handle that instead
+});
+
 
 
   const onCallResponse = (payload: any) => {
@@ -321,7 +321,7 @@ useEffect(() => {
   // Register all listeners
   socket.on("connect", onConnect);
   socket.on("user:status", onUserStatus);
-  socket.on("call:incoming", onIncoming);
+  //socket.on("call:incoming", onIncoming);
   socket.on("call:response", onCallResponse);
 
   // If already connected, call onConnect immediately
