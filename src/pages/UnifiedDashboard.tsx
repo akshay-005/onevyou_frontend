@@ -100,6 +100,7 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
   //const [showIncoming, setShowIncoming] = useState(false);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [onlineCount, setOnlineCount] = useState(0);
+  const [pendingRequests, setPendingRequests] = useState(0);
 
   // ✅ NEW: Ref to track if user manually toggled (prevents auto-sync from overriding manual toggle)
   const userManuallyToggled = useRef(false);
@@ -162,6 +163,15 @@ useEffect(() => {
   };
 }, []);
 
+useEffect(() => {
+  const handleRequestHandled = () => {
+    setPendingRequests(prev => Math.max(0, prev - 1));
+  };
+
+  window.addEventListener('call-request-handled', handleRequestHandled);
+  return () => window.removeEventListener('call-request-handled', handleRequestHandled);
+}, []);
+
 // Fetch online users
 const fetchOnlineUsers = async () => {
   try {
@@ -222,19 +232,17 @@ useEffect(() => {
     });
   };
 
-  const onIncoming = (payload: any) => {
-  console.log("📞 Incoming call from", payload.callerName, payload);
-
-  // ✅ Don't auto-navigate - let NotificationPanel handle it
-  // Just show notification toast
-  toast({
-    title: "📞 New Call Request",
-    description: `${payload.callerName || "Someone"} wants to connect`,
-  });
-
-  // ✅ The call will appear in NotificationPanel automatically via socket event
-};
-
+ const onIncoming = (payload: any) => {
+    console.log("📞 Dashboard received incoming call:", payload);
+    
+    // ✅ Increment pending requests counter
+    setPendingRequests(prev => prev + 1);
+    
+    toast({
+      title: "📞 New Call Request",
+      description: `${payload.callerName || "Someone"} wants to connect`,
+    });
+  };
 
   const onCallResponse = (payload: any) => {
     if (payload.accepted && payload.channelName) {
@@ -544,9 +552,9 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
               className="relative"
             >
               <Bell className="h-5 w-5" />
-              {isOnline && onlineCount > 0 && (
+              {pendingRequests > 0 && (
                 <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
-                  {onlineCount}
+                  {pendingRequests}
                 </Badge>
               )}
             </Button>
@@ -664,6 +672,40 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
           </div>
         </div>
       </header>
+
+      
+
+      {/* ✅ ADD THIS ENTIRE SECTION: */}
+      {pendingRequests > 0 && (
+        <div className="container mx-auto px-6 py-4">
+          <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Bell className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                <Badge className="absolute -top-2 -right-2 h-5 w-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs">
+                  {pendingRequests}
+                </Badge>
+              </div>
+              <div>
+                <p className="font-semibold text-blue-900 dark:text-blue-100">
+                  You have {pendingRequests} new connection request{pendingRequests > 1 ? 's' : ''}
+                </p>
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  Students are waiting to learn from you
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="default"
+              onClick={() => setShowNotifications(true)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              View Requests
+            </Button>
+          </div>
+        </div>
+      )}
+
 
       {/* Main */}
       <main className="container mx-auto px-6 py-8">

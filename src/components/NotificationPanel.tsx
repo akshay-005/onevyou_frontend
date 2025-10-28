@@ -34,6 +34,7 @@ const NotificationPanel = () => {
       console.log("✅ Socket connected inside NotificationPanel:", socket.id);
       setIsSocketReady(true);
     };
+    
 
     const handleDisconnect = () => {
       console.log("⚠️ Socket disconnected");
@@ -117,6 +118,11 @@ const NotificationPanel = () => {
   // Remove from notifications
   setRequests((r) => r.filter((req) => req.id !== request.id));
 
+  // ✅ ADD THIS LINE:
+  window.dispatchEvent(new CustomEvent('call-request-handled'));
+
+  // Navigate to call room
+
   // Navigate to call room
   const duration = parseInt(request.duration) || 1;
   setTimeout(() => {
@@ -150,6 +156,8 @@ const NotificationPanel = () => {
     variant: "destructive",
   });
 
+   window.dispatchEvent(new CustomEvent('call-request-handled'));
+
   setRequests((r) => r.filter((req) => req.id !== requestId));
 };
   // 🧩 Show a connecting placeholder if socket isn’t ready
@@ -164,6 +172,11 @@ const NotificationPanel = () => {
       </Card>
     );
   }
+
+   useEffect(() => {
+    console.log("🔍 NotificationPanel - Requests:", requests.length);
+    console.log("Socket ready:", isSocketReady);
+  }, [requests, isSocketReady]);
 
   return (
     <Card className="p-4 h-[500px] bg-gradient-to-br from-background to-primary/5">
