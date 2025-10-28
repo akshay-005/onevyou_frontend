@@ -54,7 +54,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSocket } from "@/utils/socket";
 import api from "@/utils/api";
 
-import IncomingCallModal from "@/components/IncomingCallModal";
+
 import PricingModal from "@/components/PricingModal";
 import NotificationPanel from "@/components/NotificationPanel";
 import EarningsCard from "@/components/EarningsCard";
@@ -864,12 +864,7 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
         </div>
       </main>
 
-      {/* Modals */}
-      {/*<IncomingCallModal
-        open={showIncoming}
-        data={incomingCall}
-        onClose={() => setShowIncoming(false)}
-      />*/}
+      
 <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent className="sm:max-w-lg p-0">
           <NotificationPanel requests={callRequests} />
