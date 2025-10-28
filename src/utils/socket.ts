@@ -111,15 +111,17 @@ export const SocketProvider = ({ children }: ProviderProps) => {
       const isOnline = savedOnlineState ? JSON.parse(savedOnlineState) : false; // 🧩 default offline
 
 
-      if (currentUserId) {
-        s.emit("user:status:update", { 
-          userId: currentUserId, 
-          isOnline 
-        });
-        console.log("🔄 Restored online state:", isOnline);
-      } else {
-        console.warn("⚠️ No userId available on connect");
-      }
+      const lastStatusSent = sessionStorage.getItem("lastStatusSent");
+const shouldEmit = lastStatusSent !== JSON.stringify({ userId: currentUserId, isOnline });
+
+if (currentUserId && shouldEmit) {
+  s.emit("user:status:update", { userId: currentUserId, isOnline });
+  sessionStorage.setItem("lastStatusSent", JSON.stringify({ userId: currentUserId, isOnline }));
+  console.log("🔄 Sent status:update (first connect)");
+} else {
+  console.log("⏩ Skipping redundant status:update on connect");
+}
+
     });
 
     s.on("reconnect", (attemptNumber) => {
