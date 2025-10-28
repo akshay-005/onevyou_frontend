@@ -103,13 +103,13 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   if (!socket) return;
 
   // Stop any ringtones
-  document.querySelectorAll("audio").forEach(a => {
+  document.querySelectorAll("audio").forEach((a) => {
     a.pause();
     a.src = "";
   });
 
   // Get stored call data from request
-  const callData = requests.find(r => r.id === request.id);
+  const callData = requests.find((r) => r.id === request.id);
   if (!callData) return;
 
   // Notify backend
@@ -119,7 +119,6 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     channelName: callData.channelName,
     callId: request.id,
   });
-  
 
   toast({
     title: "Call Request Accepted! 📞",
@@ -129,19 +128,21 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   // Remove from notifications
   setLocalRequests((r) => r.filter((req) => req.id !== request.id));
 
-  // ✅ Dispatch with requestId
-  window.dispatchEvent(new CustomEvent('call-request-handled', {
-    detail: { requestId: request.id }
-  }));
+  // ✅ Dispatch event for UnifiedDashboard to sync
+  window.dispatchEvent(
+    new CustomEvent("call-request-handled", {
+      detail: { requestId: request.id },
+    })
+  );
 
+  // ✅ Before navigating, mark call as already accepted
+  const duration = parseInt(request.duration) || 1;
+  setTimeout(() => {
+    localStorage.setItem("autoAccept", "true");
+    window.location.href = `/call/${callData.channelName}?role=callee&callId=${request.id}&fromUserId=${callData.fromUserId}&duration=${duration}`;
+  }, 500);
+};
 
-  // ✅ Before navigating, mark this call as already accepted
-const duration = parseInt(request.duration) || 1;
-
-setTimeout(() => {
-  localStorage.setItem("autoAccept", "true");
-  window.location.href = `/call/${callData.channelName}?role=callee&callId=${request.id}&fromUserId=${callData.fromUserId}&duration=${duration}`;
-}, 500);
 
   const handleDecline = (requestId: string) => {
   if (!socket) return;
