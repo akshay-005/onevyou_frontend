@@ -101,6 +101,9 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [onlineCount, setOnlineCount] = useState(0);
   const [pendingRequests, setPendingRequests] = useState(0);
+  const [callRequests, setCallRequests] = useState<any[]>([]); // ✅ ADD THIS LINE
+
+  // ✅ NEW: Ref to track if user manually toggled
 
   // ✅ NEW: Ref to track if user manually toggled (prevents auto-sync from overriding manual toggle)
   const userManuallyToggled = useRef(false);
@@ -164,7 +167,13 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
-  const handleRequestHandled = () => {
+  const handleRequestHandled = (e: any) => {
+    const requestId = e.detail?.requestId;
+    console.log("🗑️ Removing request:", requestId);
+    
+    if (requestId) {
+      setCallRequests(prev => prev.filter(r => r.id !== requestId));
+    }
     setPendingRequests(prev => Math.max(0, prev - 1));
   };
 
@@ -235,8 +244,24 @@ useEffect(() => {
  const onIncoming = (payload: any) => {
     console.log("📞 Dashboard received incoming call:", payload);
     
-    // ✅ Increment pending requests counter
+    // ✅ Create full request object
+    const newRequest = {
+      id: payload.callId,
+      studentName: payload.callerName || "Unknown",
+      duration: `${payload.durationMin || 1} min`,
+      price: payload.price || 0,
+      time: "Just now",
+      subject: "Incoming Call",
+      channelName: payload.channelName,
+      fromUserId: payload.fromUserId,
+      durationMin: payload.durationMin || 1,
+    };
+    
+    // ✅ Store in state
+    setCallRequests(prev => [newRequest, ...prev]);
     setPendingRequests(prev => prev + 1);
+    
+    console.log("✅ Stored request:", newRequest);
     
     toast({
       title: "📞 New Call Request",
@@ -808,10 +833,9 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
         data={incomingCall}
         onClose={() => setShowIncoming(false)}
       />*/}
-
-      <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
+<Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent className="sm:max-w-lg p-0">
-          <NotificationPanel />
+          <NotificationPanel requests={callRequests} />
         </DialogContent>
       </Dialog>
 

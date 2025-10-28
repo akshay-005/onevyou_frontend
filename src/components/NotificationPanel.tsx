@@ -21,11 +21,20 @@ interface ConnectionRequest {
   durationMin?: number;        // ✅ ADD THIS
 }
 
-const NotificationPanel = () => {
+interface NotificationPanelProps {
+  requests?: ConnectionRequest[];
+}
+
+const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProps) => {
   const { toast } = useToast();
-  const [requests, setRequests] = useState<ConnectionRequest[]>([]);
-  const socket = useSocket(); // ✅ must be at top level
+  const [localRequests, setLocalRequests] = useState<ConnectionRequest[]>([]);
+  const socket = useSocket();
   const [isSocketReady, setIsSocketReady] = useState(false);
+  
+  // ✅ Use external requests if provided, otherwise use local state
+  const requests = externalRequests || localRequests;
+  
+  console.log("📋 NotificationPanel requests:", requests.length);
 
   useEffect(() => {
     if (!socket) return;
@@ -45,7 +54,8 @@ const NotificationPanel = () => {
     socket.on("disconnect", handleDisconnect);
 
    socket.on("call:incoming", (data) => {
-  console.log("📞 Incoming call data:", data);
+  console.log("📞 NotificationPanel received incoming call:", data);
+  console.log("Current requests before adding:", requests);
   
   const newRequest = {
     id: data.callId,
@@ -59,7 +69,7 @@ const NotificationPanel = () => {
     durationMin: data.durationMin || 1,      // ✅ STORE THIS
   };
   
-  setRequests((prev) => [newRequest, ...prev]);
+  setLocalRequests((prev) => [newRequest, ...prev]);
   
   // Play incoming sound
   const audio = new Audio("/sounds/incoming.mp3");
@@ -73,11 +83,11 @@ const NotificationPanel = () => {
 });
 
     socket.on("call:cancelled", ({ callId }) => {
-      setRequests((prev) => prev.filter((r) => r.id !== callId));
+      setLocalRequests((prev) => prev.filter((r) => r.id !== callId));
     });
 
     socket.on("call:timeout", ({ callId }) => {
-      setRequests((prev) => prev.filter((r) => r.id !== callId));
+      setLocalRequests((prev) => prev.filter((r) => r.id !== callId));
     });
 
     return () => {
@@ -109,6 +119,7 @@ const NotificationPanel = () => {
     channelName: callData.channelName,
     callId: request.id,
   });
+  
 
   toast({
     title: "Call Request Accepted! 📞",
@@ -116,10 +127,12 @@ const NotificationPanel = () => {
   });
 
   // Remove from notifications
-  setRequests((r) => r.filter((req) => req.id !== request.id));
+  setLocalRequests((r) => r.filter((req) => req.id !== request.id));
 
-  // ✅ ADD THIS LINE:
-  window.dispatchEvent(new CustomEvent('call-request-handled'));
+  // ✅ Dispatch with requestId
+  window.dispatchEvent(new CustomEvent('call-request-handled', {
+    detail: { requestId: request.id }
+  }));
 
   // Navigate to call room
 
@@ -156,9 +169,11 @@ const NotificationPanel = () => {
     variant: "destructive",
   });
 
-   window.dispatchEvent(new CustomEvent('call-request-handled'));
+   window.dispatchEvent(new CustomEvent('call-request-handled', {
+    detail: { requestId: requestId }
+  }));
 
-  setRequests((r) => r.filter((req) => req.id !== requestId));
+  setLocalRequests((r) => r.filter((req) => req.id !== requestId));
 };
   // Show connecting state inline instead of blocking entire panel
   const isConnecting = !socket || !isSocketReady;
