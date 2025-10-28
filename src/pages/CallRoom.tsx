@@ -72,6 +72,12 @@ const CallRoom: React.FC = () => {
 
   // Cleanup function
   const cleanup = async () => {
+
+    if (!hasJoinedRef.current) {
+  console.warn("⚠️ Cleanup triggered before joining — ignoring");
+  return;
+}
+
     if (isCleaningUpRef.current) {
       console.log("⚠️ Cleanup already in progress, skipping");
       return;
@@ -462,14 +468,6 @@ useEffect(() => {
 }, [socket]);
 
 
-// ✅ Cleanup if user closes tab or refreshes
-useEffect(() => {
-  const handleBeforeUnload = () => {
-    cleanup();
-  };
-  window.addEventListener("beforeunload", handleBeforeUnload);
-  return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-}, []);
 
 
   // Controls
@@ -493,88 +491,36 @@ useEffect(() => {
     return `${m}:${s}`;
   };
 
-  // UI States
-  {/*if (role === "callee" && !accepted) {
-    const callId = query.get("callId");
-    const callerId = query.get("fromUserId");
 
-    
-
-    return (
-      <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white text-center px-4">
-        <audio id="incomingTone" autoPlay loop>
-          <source src="/sounds/incoming.mp3" type="audio/mpeg" />
-        </audio>
-        
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="space-y-6"
-        >
-          <div className="w-24 h-24 mx-auto bg-green-500/20 rounded-full flex items-center justify-center animate-pulse">
-            <PhoneOff className="w-12 h-12 text-green-500 rotate-180" />
-          </div>
-          
-          <h2 className="text-3xl font-bold">📞 Incoming Call</h2>
-          <p className="text-gray-400 max-w-sm">
-            Accept to enable your camera and microphone
-          </p>
-
-          <div className="flex gap-6 justify-center pt-4">
-            <button
-              onClick={() => {
-                document.querySelectorAll("audio").forEach(a => {
-                  a.pause();
-                  a.src = "";
-                });
-                setAccepted(true);
-                safeEmit("call:response", {
-                  toUserId: callerId,
-                  accepted: true,
-                  callId,
-                  channelName,
-                });
-              }}
-              className="px-8 py-4 bg-green-600 hover:bg-green-700 rounded-full text-white font-semibold shadow-xl transform hover:scale-105 transition"
-            >
-              Accept Call
-            </button>
-
-            <button
-              onClick={() => {
-                document.querySelectorAll("audio").forEach(a => {
-                  a.pause();
-                  a.src = "";
-                });
-                safeEmit("call:response", {
-                  toUserId: callerId,
-                  accepted: false,
-                  callId,
-                  channelName,
-                });
-                navigate("/dashboard");
-              }}
-              className="px-8 py-4 bg-red-600 hover:bg-red-700 rounded-full text-white font-semibold shadow-xl transform hover:scale-105 transition"
-            >
-              Decline
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }  */}
+  
+// ✅ Cleanup if user closes tab or refreshes
+useEffect(() => {
+  const handleBeforeUnload = () => {
+    cleanup();
+  };
+  window.addEventListener("beforeunload", handleBeforeUnload);
+  return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+}, []);
 
 
+
+ // 🔧 AUTO-ACCEPT HANDLER for NotificationPanel navigations
+useEffect(() => {
   if (role === "callee" && !accepted) {
-  // Auto-accept since we already accepted via NotificationPanel
-  console.log("🎬 Callee auto-accepted call (navigated from NotificationPanel)");
-  setAccepted(true);
+    console.log("🎬 Auto-accept triggered for callee (navigated from NotificationPanel)");
+    setAccepted(true);
+  }
+}, [role, accepted]);
+
+
+ if (role === "callee" && !accepted) {
   return (
     <div className="h-screen flex items-center justify-center bg-black text-white">
       <p>Connecting...</p>
     </div>
   );
 }
+
 
 
   if (role === "caller" && !accepted) {
