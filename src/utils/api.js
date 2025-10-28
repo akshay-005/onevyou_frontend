@@ -33,8 +33,6 @@ export const getOnlineUsers = async () =>
 export const getMe = async () =>
   fetchJSON(`${API_BASE}/api/users/me`, { headers: getAuthHeaders() });
 
-
-
 // 🔹 Create Razorpay Order
 export const createOrder = async (amount) =>
   fetchJSON(`${API_BASE}/api/payment/create-order`, {
@@ -51,6 +49,23 @@ export const verifyPayment = async (data) =>
     body: JSON.stringify(data),
   });
 
+
+// ✅ 🔹 ADD THIS NEW FUNCTION (Fix)
+export const createCallSession = async ({ teacherId, durationMin, price }) =>
+  fetchJSON(`${API_BASE}/api/call/session`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ teacherId, durationMin, price }),
+  });
+
+
 // ✅ Export everything
-const api = { getOnlineUsers, getMe, createOrder, verifyPayment };
+const api = { 
+  getOnlineUsers, 
+  getMe, 
+  createOrder, 
+  verifyPayment,
+  createCallSession, // <-- 👈 include this here
+};
+
 export default api;
