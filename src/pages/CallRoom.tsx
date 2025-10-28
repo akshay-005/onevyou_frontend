@@ -30,7 +30,17 @@ const CallRoom: React.FC = () => {
   const [durationSec, setDurationSec] = useState(0);
   const [joined, setJoined] = useState(false);
   const [isSwapped, setIsSwapped] = useState(false);
-  const [accepted, setAccepted] = useState(false);
+ const [accepted, setAccepted] = useState(() => {
+  const role = new URLSearchParams(window.location.search).get("role");
+  // If role=callee and we just came from an accepted flow, skip the incoming screen
+  const autoAccept = localStorage.getItem("autoAccept") === "true";
+  if (role === "callee" && autoAccept) {
+    localStorage.removeItem("autoAccept");
+    return true;
+  }
+  return false;
+});
+
   const [isConnecting, setIsConnecting] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";

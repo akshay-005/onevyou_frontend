@@ -135,12 +135,13 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   }));
 
 
-  // Navigate to call room
-  const duration = parseInt(request.duration) || 1;
-  setTimeout(() => {
-    window.location.href = `/call/${callData.channelName}?role=callee&callId=${request.id}&fromUserId=${callData.fromUserId}&duration=${duration}`;
-  }, 500);
-};
+  // ✅ Before navigating, mark this call as already accepted
+const duration = parseInt(request.duration) || 1;
+
+setTimeout(() => {
+  localStorage.setItem("autoAccept", "true");
+  window.location.href = `/call/${callData.channelName}?role=callee&callId=${request.id}&fromUserId=${callData.fromUserId}&duration=${duration}`;
+}, 500);
 
   const handleDecline = (requestId: string) => {
   if (!socket) return;
