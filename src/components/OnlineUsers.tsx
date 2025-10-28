@@ -52,10 +52,10 @@ export default function OnlineUsers() {
       // If this client receives incoming_call (meaning they are the callee)
       toast({ title: "Incoming call", description: `${payload.from?.name} is calling...` });
       // you could also store in state to show an incoming call modal
-    }; 
+    };
 
     socket.on("user:status", onUserStatus);
-    //socket.on("incoming_call", onIncomingCall);
+    socket.on("incoming_call", onIncomingCall);
 
     return () => {
       socket.off("user:status", onUserStatus);

@@ -54,7 +54,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSocket } from "@/utils/socket";
 import api from "@/utils/api";
 
-
+import IncomingCallModal from "@/components/IncomingCallModal";
 import PricingModal from "@/components/PricingModal";
 import NotificationPanel from "@/components/NotificationPanel";
 import EarningsCard from "@/components/EarningsCard";
@@ -274,15 +274,9 @@ useEffect(() => {
   };
 
  const onIncoming = (payload: any) => {
-  console.log("📞 Incoming call (Dashboard, silent sync):", payload);
-
-  // ✅ Avoid duplicate — already handled by NotificationPanel
-  const existing = callRequests.find((r) => r.id === payload.callId);
-  if (existing) {
-    console.log("🟡 Duplicate incoming detected, skipping...");
-    return;
-  }
-
+  console.log("📞 Dashboard received incoming call:", payload);
+  
+  // ✅ Create full request object
   const newRequest = {
     id: payload.callId,
     studentName: payload.callerName || "Unknown",
@@ -294,17 +288,24 @@ useEffect(() => {
     fromUserId: payload.fromUserId,
     durationMin: payload.durationMin || 1,
   };
-
-  // ✅ Update state + localStorage only (no ringtone or toast)
-  setCallRequests((prev) => {
+  
+  // ✅ Store in state
+  setCallRequests(prev => {
     const updated = [newRequest, ...prev];
-    localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
+    // ✅ ADD THIS: Save to localStorage
+    localStorage.setItem('pendingCallRequests', JSON.stringify(updated));
     return updated;
   });
-
-  setPendingRequests((prev) => prev + 1);
+  
+  setPendingRequests(prev => prev + 1);
+  
+  console.log("✅ Stored request:", newRequest);
+  
+  toast({
+    title: "📞 New Call Request",
+    description: `${payload.callerName || "Someone"} wants to connect`,
+  });
 };
-
 
   const onCallResponse = (payload: any) => {
     if (payload.accepted && payload.channelName) {
@@ -864,7 +865,12 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
         </div>
       </main>
 
-      
+      {/* Modals */}
+      {/*<IncomingCallModal
+        open={showIncoming}
+        data={incomingCall}
+        onClose={() => setShowIncoming(false)}
+      />*/}
 <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent className="sm:max-w-lg p-0">
           <NotificationPanel requests={callRequests} />
