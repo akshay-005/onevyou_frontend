@@ -1,3 +1,6 @@
+// 🚫 Temporary disable: prevent double modal issue
+if (true) export default () => null;
+
 import { useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
