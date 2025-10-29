@@ -127,10 +127,8 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
   // Pricing Settings
   const [customDurations, setCustomDurations] = useState([
-    { id: 1, minutes: 1, price: 39, isBase: true },
-    { id: 2, minutes: 5, price: 199, isBase: false },
-    { id: 3, minutes: 10, price: 399, isBase: false },
-  ]);
+  { id: 1, minutes: 1, price: 39, isBase: true }
+]);
   const [newDuration, setNewDuration] = useState({ minutes: "", price: "" });
 
   // KEY SECTIONS TO REPLACE IN UnifiedDashboard.tsx
@@ -165,6 +163,36 @@ useEffect(() => {
     mounted = false;
   };
 }, []);
+
+// ✅ Load user's saved pricing tiers
+useEffect(() => {
+  if (currentUser?.pricingTiers && Array.isArray(currentUser.pricingTiers)) {
+    console.log("📊 Loading user's saved pricing:", currentUser.pricingTiers);
+    
+    const tiers = currentUser.pricingTiers.map((tier, index) => ({
+      id: Date.now() + index,
+      minutes: tier.minutes,
+      price: tier.price,
+      isBase: tier.minutes === 1
+    }));
+    
+    // Ensure 1-minute base tier exists
+    if (!tiers.find(t => t.minutes === 1)) {
+      console.warn("⚠️ No 1-minute tier found, adding default");
+      tiers.unshift({ 
+        id: Date.now(), 
+        minutes: 1, 
+        price: currentUser.ratePerMinute || 39, 
+        isBase: true 
+      });
+    }
+    
+    tiers.sort((a, b) => a.minutes - b.minutes);
+    setCustomDurations(tiers);
+    console.log("✅ Pricing tiers loaded:", tiers);
+  }
+}, [currentUser]);
+
 
 useEffect(() => {
   const handleRequestHandled = (e: any) => {
@@ -988,232 +1016,332 @@ const getMinimumPrice = (minutes: number): number => {
 
     
 
-      <Dialog open={showPricingSettings} onOpenChange={setShowPricingSettings}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Manage Your Pricing</DialogTitle>
-            <DialogDescription>
-              Set custom durations and prices for your calls
-            </DialogDescription>
-          </DialogHeader>
+      // REPLACE YOUR PRICING SETTINGS DIALOG IN UnifiedDashboard.tsx
 
-          <div className="space-y-4 py-4">
-            {customDurations
-              .filter((d) => d.isBase)
-              .map((base) => (
-                <div
-                  key={base.id}
-                  className="bg-primary/10 p-3 rounded-lg flex justify-between items-center"
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">Base</Badge>
-                    <span className="font-medium">{base.minutes} min</span>
+<Dialog open={showPricingSettings} onOpenChange={setShowPricingSettings}>
+  <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+    <DialogHeader>
+      <DialogTitle>Manage Your Pricing</DialogTitle>
+      <DialogDescription>
+        Set custom durations and prices. Minimum: ₹39 for 1 min, +₹10 per additional minute.
+      </DialogDescription>
+    </DialogHeader>
+
+    <div className="space-y-4 py-4">
+      {/* Base Pricing (1 minute) - Always shown, editable */}
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Base Rate (1 minute)</Label>
+        <div className="flex items-center gap-3 bg-primary/10 p-4 rounded-lg border border-primary/20">
+          <div className="flex-1">
+            <Badge variant="secondary" className="mb-2">Required</Badge>
+            <div className="flex items-center gap-2">
+              <span className="font-medium">1 minute</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <IndianRupee className="h-4 w-4 text-muted-foreground" />
+            <Input
+              type="number"
+              min="39"
+              value={customDurations.find(d => d.minutes === 1)?.price || 39}
+              onChange={(e) => {
+                const newPrice = Math.max(39, parseInt(e.target.value) || 39);
+                setCustomDurations(prev => {
+                  const updated = prev.map(d => 
+                    d.minutes === 1 ? { ...d, price: newPrice } : d
+                  );
+                  // If 1-min tier doesn't exist, add it
+                  if (!updated.find(d => d.minutes === 1)) {
+                    updated.unshift({ id: Date.now(), minutes: 1, price: newPrice, isBase: true });
+                  }
+                  return updated;
+                });
+              }}
+              className={`w-24 h-10 text-center font-semibold ${
+                (customDurations.find(d => d.minutes === 1)?.price || 39) < 39 
+                  ? "border-red-500" 
+                  : "border-green-500"
+              }`}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Minimum allowed: ₹39
+        </p>
+      </div>
+
+      {/* Custom Duration Tiers */}
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Custom Duration Packages</Label>
+        {customDurations
+          .filter(d => d.minutes !== 1)
+          .sort((a, b) => a.minutes - b.minutes)
+          .map((d) => {
+            const minPrice = getMinimumPrice(d.minutes);
+            const isValid = d.price >= minPrice;
+            
+            return (
+              <div
+                key={d.id}
+                className={`flex items-center gap-3 border rounded-lg p-3 transition-all ${
+                  isValid 
+                    ? "border-border bg-card" 
+                    : "border-red-300 bg-red-50 dark:bg-red-950/20"
+                }`}
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium">{d.minutes} minutes</span>
+                    {!isValid && (
+                      <Badge variant="destructive" className="text-xs">
+                        Below minimum
+                      </Badge>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <IndianRupee className="h-4 w-4" />
-                    <span className="font-bold">{base.price}</span>
-                  </div>
+                  <p className={`text-xs ${
+                    isValid ? "text-muted-foreground" : "text-red-600 dark:text-red-400"
+                  }`}>
+                    Minimum: ₹{minPrice} {isValid && "✓"}
+                  </p>
                 </div>
-              ))}
 
-            {customDurations
-              .filter((d) => !d.isBase)
-              .map((d) => (
-                <div
-  key={d.id}
-  className="flex flex-col border rounded-lg p-2 space-y-2"
->
-  <div className="flex justify-between items-center">
-    <div className="flex items-center gap-2">
-      <span className="font-medium">{d.minutes} min</span>
-      <div className="flex items-center gap-1">
-        <IndianRupee className="h-4 w-4 text-muted-foreground" />
-        <Input
-          type="number"
-          value={d.price}
-          onChange={(e) => {
-            const newPrice = parseInt(e.target.value) || 0;
-            const updated = customDurations.map((cd) =>
-              cd.id === d.id ? { ...cd, price: newPrice } : cd
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <IndianRupee className="h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="number"
+                      min={minPrice}
+                      value={d.price}
+                      onChange={(e) => {
+                        const newPrice = parseInt(e.target.value) || 0;
+                        setCustomDurations(prev =>
+                          prev.map(cd =>
+                            cd.id === d.id ? { ...cd, price: newPrice } : cd
+                          )
+                        );
+                      }}
+                      className={`w-24 h-9 text-center ${
+                        isValid ? "border-green-500" : "border-red-500"
+                      }`}
+                    />
+                  </div>
+
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() =>
+                      setCustomDurations(prev => 
+                        prev.filter(cd => cd.id !== d.id)
+                      )
+                    }
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             );
-            setCustomDurations(updated);
-          }}
-          className={`w-20 h-8 ${
-            d.price < getMinimumPrice(d.minutes) ? "border-red-500" : ""
-          }`}
-        />
+          })}
+      </div>
+
+      {/* Add New Duration */}
+      <div className="space-y-2 pt-4 border-t">
+        <Label className="text-sm font-medium">Add Custom Duration</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Minutes"
+            type="number"
+            min="2"
+            className="w-28"
+            value={newDuration.minutes}
+            onChange={(e) =>
+              setNewDuration({ ...newDuration, minutes: e.target.value })
+            }
+          />
+          <Input
+            placeholder={`Min: ₹${newDuration.minutes ? getMinimumPrice(parseInt(newDuration.minutes)) : '49'}`}
+            type="number"
+            className="w-28"
+            value={newDuration.price}
+            onChange={(e) =>
+              setNewDuration({ ...newDuration, price: e.target.value })
+            }
+          />
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => {
+              if (newDuration.minutes && newDuration.price) {
+                const minutes = parseInt(newDuration.minutes);
+                const price = parseInt(newDuration.price);
+                const minPrice = getMinimumPrice(minutes);
+
+                if (minutes < 1) {
+                  toast({
+                    title: "Invalid Duration",
+                    description: "Duration must be at least 1 minute",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                if (price < minPrice) {
+                  toast({
+                    title: "Invalid Price",
+                    description: `Minimum price for ${minutes} min is ₹${minPrice}`,
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                // Check for duplicate
+                if (customDurations.find(d => d.minutes === minutes)) {
+                  toast({
+                    title: "Duplicate Duration",
+                    description: `${minutes}-minute option already exists`,
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                setCustomDurations([
+                  ...customDurations,
+                  {
+                    id: Date.now(),
+                    minutes,
+                    price,
+                    isBase: false,
+                  },
+                ]);
+                setNewDuration({ minutes: "", price: "" });
+                toast({
+                  title: "Added",
+                  description: `${minutes}-minute option added`,
+                });
+              }
+            }}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Formula: ₹39 base + ₹10 per additional minute
+        </p>
+      </div>
+
+      {/* Quick Add Buttons */}
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Quick Add Packages</Label>
+        <div className="flex flex-wrap gap-2">
+          {[5, 10, 15, 20, 30, 60].map((min) => {
+            const price = getMinimumPrice(min);
+            const exists = customDurations.find(d => d.minutes === min);
+            
+            return (
+              <Button
+                key={min}
+                size="sm"
+                variant={exists ? "secondary" : "outline"}
+                disabled={exists}
+                onClick={() => {
+                  setCustomDurations([
+                    ...customDurations,
+                    {
+                      id: Date.now() + min,
+                      minutes: min,
+                      price: price,
+                      isBase: false,
+                    },
+                  ]);
+                }}
+                className="text-xs"
+              >
+                {exists && "✓ "}
+                {min}m - ₹{price}
+              </Button>
+            );
+          })}
+        </div>
       </div>
     </div>
 
+    {/* Save Button */}
     <Button
-      size="icon"
-      variant="ghost"
-      onClick={() =>
-        setCustomDurations(customDurations.filter((cd) => cd.id !== d.id))
-      }
+      className="w-full"
+      onClick={async () => {
+        // Validate all tiers
+        const invalid = customDurations.find(
+          (d) => d.price < getMinimumPrice(d.minutes)
+        );
+        
+        if (invalid) {
+          toast({
+            title: "Invalid Pricing",
+            description: `${invalid.minutes}m must be at least ₹${getMinimumPrice(invalid.minutes)}`,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Ensure 1-minute base tier exists
+        if (!customDurations.find(d => d.minutes === 1)) {
+          customDurations.unshift({
+            id: Date.now(),
+            minutes: 1,
+            price: 39,
+            isBase: true
+          });
+        }
+
+        try {
+          const cleanedTiers = customDurations
+            .map((d) => ({
+              minutes: d.minutes,
+              price: d.price,
+            }))
+            .sort((a, b) => a.minutes - b.minutes);
+
+          console.log("💾 Saving pricing tiers:", cleanedTiers);
+
+          const res = await api.updatePricing(cleanedTiers);
+
+          if (res.success) {
+            toast({
+              title: "✅ Pricing Saved",
+              description: "Your pricing has been updated successfully.",
+            });
+
+            // Refresh current user data
+            const userData = await api.getMe();
+            if (userData?.success && userData?.user) {
+              setCurrentUser(userData.user);
+            }
+
+            // Refresh online users
+            fetchOnlineUsers();
+
+            setShowPricingSettings(false);
+          } else {
+            toast({
+              title: "Error",
+              description: res.message || "Failed to update pricing.",
+              variant: "destructive",
+            });
+          }
+        } catch (err) {
+          console.error("❌ Save pricing error:", err);
+          toast({
+            title: "Server Error",
+            description: "Could not update pricing. Try again later.",
+            variant: "destructive",
+          });
+        }
+      }}
     >
-      <X className="h-4 w-4" />
+      Save Pricing
     </Button>
-  </div>
-
-  {/* ✅ Show transparent minimum info */}
-  <span
-    className={`text-xs ${
-      d.price < getMinimumPrice(d.minutes)
-        ? "text-red-500"
-        : "text-muted-foreground"
-    }`}
-  >
-    Minimum allowed: ₹{getMinimumPrice(d.minutes)}
-  </span>
-</div>
-              ))}
-
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="Minutes"
-                type="number"
-                className="w-24"
-                value={newDuration.minutes}
-                onChange={(e) =>
-                  setNewDuration({ ...newDuration, minutes: e.target.value })
-                }
-              />
-              <Input
-                placeholder="Price"
-                type="number"
-                className="w-24"
-                value={newDuration.price}
-                onChange={(e) =>
-                  setNewDuration({ ...newDuration, price: e.target.value })
-                }
-              />
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => {
-  if (newDuration.minutes && newDuration.price) {
-    const minutes = parseInt(newDuration.minutes);
-    const price = parseInt(newDuration.price);
-    const minPrice = getMinimumPrice(minutes);
-
-    if (price < minPrice) {
-      toast({
-        title: "Invalid Price",
-        description: `Minimum allowed for ${minutes} min is ₹${minPrice}`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setCustomDurations([
-      ...customDurations,
-      {
-        id: Date.now(),
-        minutes,
-        price,
-        isBase: false,
-      },
-    ]);
-    setNewDuration({ minutes: "", price: "" });
-    toast({
-      title: "Added",
-      description: `${minutes}-minute option added`,
-    });
-  }
-}}
-
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {[5, 10, 15, 20, 30, 60].map((min) => (
-                <Button
-                  key={min}
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    setCustomDurations([
-                      ...customDurations,
-                      {
-                        id: Date.now() + min,
-                        minutes: min,
-                        price: min * 39,
-                        isBase: false,
-                      },
-                    ])
-                  }
-                >
-                  {min} min - ₹{min * 39}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          <Button
-           onClick={async () => {
-  const invalid = customDurations.some(
-    (d) => d.price < getMinimumPrice(d.minutes)
-  );
-  if (invalid) {
-    toast({
-      title: "Error",
-      description: "Please ensure all prices meet minimum limits.",
-      variant: "destructive",
-    });
-    return;
-  }
-
-  try {
-    const cleanedTiers = customDurations.map((d) => ({
-  minutes: d.minutes,
-  price: d.price,
-}));
-
-const res = await api.updatePricing(cleanedTiers);
-
-    if (res.success) {
-      toast({
-        title: "✅ Pricing Saved",
-        description: "Your pricing has been updated successfully.",
-      });
-
-      // Refresh the online users so others see new rate immediately
-      fetchOnlineUsers();
-
-      // Emit socket event manually (optional if backend does it)
-      if (socket && currentUser?._id) {
-        socket.emit("user:pricing:update", {
-          userId: currentUser._id,
-          pricingTiers: customDurations,
-        });
-      }
-
-      setShowPricingSettings(false);
-    } else {
-      toast({
-        title: "Error",
-        description: res.message || "Failed to update pricing.",
-        variant: "destructive",
-      });
-    }
-  } catch (err) {
-    console.error(err);
-    toast({
-      title: "Server Error",
-      description: "Could not update pricing. Try again later.",
-      variant: "destructive",
-    });
-  }
-}}
-
-          >
-            Save Pricing
-          </Button>
-        </DialogContent>
-      </Dialog>
+  </DialogContent>
+</Dialog>
 
       <Dialog open={showEarnings} onOpenChange={setShowEarnings}>
         <DialogContent className="sm:max-w-2xl">

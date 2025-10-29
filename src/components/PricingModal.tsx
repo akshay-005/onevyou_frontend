@@ -54,11 +54,12 @@ const PricingModal = ({
   const [paymentMethod, setPaymentMethod] = useState("");
 
     // 🧭 Whenever teacher updates (e.g., pricing changed), log and refresh durations
-  useEffect(() => {
-    if (teacher?.pricingTiers) {
-      console.log("🧮 PricingModal received updated teacher data:", teacher.pricingTiers);
-    }
-  }, [teacher]);
+  // ADD at the top of PricingModal component
+useEffect(() => {
+  if (teacher?.pricingTiers) {
+    console.log("💰 PricingModal loaded with tiers:", teacher.pricingTiers);
+  }
+}, [teacher]);
 
 
   // ✅ Store current user data
