@@ -529,6 +529,14 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
   return list;
 }, [users, searchTerm, sortBy, filterBy]);
 
+
+// 🧮 Helper to get minimum allowed price
+const getMinimumPrice = (minutes: number): number => {
+  if (!minutes || minutes <= 0) return 0;
+  return 39 + (minutes - 1) * 10;
+};
+
+
   // --- UI ---
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/30 to-background relative">
@@ -941,6 +949,8 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
         />
       )}
 
+    
+
       <Dialog open={showPricingSettings} onOpenChange={setShowPricingSettings}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -973,40 +983,53 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
               .filter((d) => !d.isBase)
               .map((d) => (
                 <div
-                  key={d.id}
-                  className="flex items-center justify-between border rounded-lg p-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <span>{d.minutes} min</span>
-                    <div className="flex items-center gap-1">
-                      <IndianRupee className="h-4 w-4 text-muted-foreground" />
-                      <Input
-                        type="number"
-                        value={d.price}
-                        onChange={(e) => {
-                          const updated = customDurations.map((cd) =>
-                            cd.id === d.id
-                              ? { ...cd, price: parseInt(e.target.value) || 0 }
-                              : cd
-                          );
-                          setCustomDurations(updated);
-                        }}
-                        className="w-20 h-8"
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() =>
-                      setCustomDurations(
-                        customDurations.filter((cd) => cd.id !== d.id)
-                      )
-                    }
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+  key={d.id}
+  className="flex flex-col border rounded-lg p-2 space-y-2"
+>
+  <div className="flex justify-between items-center">
+    <div className="flex items-center gap-2">
+      <span className="font-medium">{d.minutes} min</span>
+      <div className="flex items-center gap-1">
+        <IndianRupee className="h-4 w-4 text-muted-foreground" />
+        <Input
+          type="number"
+          value={d.price}
+          onChange={(e) => {
+            const newPrice = parseInt(e.target.value) || 0;
+            const updated = customDurations.map((cd) =>
+              cd.id === d.id ? { ...cd, price: newPrice } : cd
+            );
+            setCustomDurations(updated);
+          }}
+          className={`w-20 h-8 ${
+            d.price < getMinimumPrice(d.minutes) ? "border-red-500" : ""
+          }`}
+        />
+      </div>
+    </div>
+
+    <Button
+      size="icon"
+      variant="ghost"
+      onClick={() =>
+        setCustomDurations(customDurations.filter((cd) => cd.id !== d.id))
+      }
+    >
+      <X className="h-4 w-4" />
+    </Button>
+  </div>
+
+  {/* ✅ Show transparent minimum info */}
+  <span
+    className={`text-xs ${
+      d.price < getMinimumPrice(d.minutes)
+        ? "text-red-500"
+        : "text-muted-foreground"
+    }`}
+  >
+    Minimum allowed: ₹{getMinimumPrice(d.minutes)}
+  </span>
+</div>
               ))}
 
             <div className="flex items-center gap-2">
@@ -1032,25 +1055,37 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
                 size="icon"
                 variant="outline"
                 onClick={() => {
-                  if (newDuration.minutes && newDuration.price) {
-                    const minutes = parseInt(newDuration.minutes);
-                    const price = parseInt(newDuration.price);
-                    setCustomDurations([
-                      ...customDurations,
-                      {
-                        id: Date.now(),
-                        minutes,
-                        price,
-                        isBase: false,
-                      },
-                    ]);
-                    setNewDuration({ minutes: "", price: "" });
-                    toast({
-                      title: "Added",
-                      description: `${minutes}-minute option added`,
-                    });
-                  }
-                }}
+  if (newDuration.minutes && newDuration.price) {
+    const minutes = parseInt(newDuration.minutes);
+    const price = parseInt(newDuration.price);
+    const minPrice = getMinimumPrice(minutes);
+
+    if (price < minPrice) {
+      toast({
+        title: "Invalid Price",
+        description: `Minimum allowed for ${minutes} min is ₹${minPrice}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCustomDurations([
+      ...customDurations,
+      {
+        id: Date.now(),
+        minutes,
+        price,
+        isBase: false,
+      },
+    ]);
+    setNewDuration({ minutes: "", price: "" });
+    toast({
+      title: "Added",
+      description: `${minutes}-minute option added`,
+    });
+  }
+}}
+
               >
                 <Plus className="h-4 w-4" />
               </Button>
@@ -1081,13 +1116,29 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
           </div>
 
           <Button
-            onClick={() => {
-              setShowPricingSettings(false);
-              toast({
-                title: "Saved",
-                description: "Your pricing settings have been updated",
-              });
-            }}
+           onClick={() => {
+  const invalid = customDurations.some(
+    (d) => d.price < getMinimumPrice(d.minutes)
+  );
+  if (invalid) {
+    toast({
+      title: "Error",
+      description: "Please ensure all prices meet minimum limits.",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  // 🧠 Here you can call backend API to update prices
+  // await api.updatePricing(customDurations);
+
+  setShowPricingSettings(false);
+  toast({
+    title: "Saved",
+    description: "Your pricing settings have been updated",
+  });
+}}
+
           >
             Save Pricing
           </Button>
