@@ -16,9 +16,8 @@ import Privacy from "./pages/Privacy";
 import HelpSupport from "./pages/HelpSupport";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
-
-// ✅ Import this
 import { SocketProvider } from "@/utils/socket";
+import SocketManager from "@/components/SocketManager";
 import "./utils/debugHelper";
 
 const queryClient = new QueryClient();
@@ -33,6 +32,8 @@ const App = () => {
         <BrowserRouter>
           {/* ✅ Wrap the entire app inside SocketProvider */}
           <SocketProvider>
+           {/* ✅ Global socket listener that always stays active */}
+          <SocketManager />
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/auth" element={<Auth />} />

@@ -163,6 +163,19 @@ if (userId && channelName) {
       title: "Call ended", 
       description: `Duration: ${mins}m ${secs}s` 
     });
+
+
+   if (socket && typeof socket.connect === "function" && !socket.connected) {
+  console.log("🔄 Reconnecting socket after cleanup...");
+  socket.connect();
+}
+
+
+await safeEmit("user:status:update", { 
+  userId: localStorage.getItem("userId"), 
+  isOnline: true 
+});
+
     
     setTimeout(() => navigate("/dashboard"), 300);
   };
