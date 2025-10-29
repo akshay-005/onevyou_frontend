@@ -53,12 +53,30 @@ const PricingModal = ({
   const [customMinutes, setCustomMinutes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
 
+    // 🧭 Whenever teacher updates (e.g., pricing changed), log and refresh durations
+  useEffect(() => {
+    if (teacher?.pricingTiers) {
+      console.log("🧮 PricingModal received updated teacher data:", teacher.pricingTiers);
+    }
+  }, [teacher]);
+
+
   // ✅ Store current user data
   const [currentUser, setCurrentUser] = useState<any>(null);
 
-  const sortedTiers = [...teacher.pricingTiers].sort(
-    (a, b) => a.minutes - b.minutes
+    const [sortedTiers, setSortedTiers] = useState(
+    [...(teacher?.pricingTiers || [])].sort((a, b) => a.minutes - b.minutes)
   );
+
+  // ✅ Automatically refresh tiers when teacher prop changes
+  useEffect(() => {
+    if (teacher?.pricingTiers) {
+      const sorted = [...teacher.pricingTiers].sort((a, b) => a.minutes - b.minutes);
+      setSortedTiers(sorted);
+      console.log("🔄 Updated pricing tiers in modal:", sorted);
+    }
+  }, [teacher]);
+
 
   const durations = sortedTiers.map((tier, index) => ({
     value: `${tier.minutes}`,

@@ -283,15 +283,25 @@ useEffect(() => {
 
   // ✅ Listen for pricing updates in real time
   const onPricingUpdate = (update: any) => {
-    setUsers((prev) =>
-      prev.map((u) =>
-        u._id === update.userId
-          ? { ...u, pricingTiers: update.pricingTiers }
-          : u
-      )
-    );
-    console.log("💰 Pricing updated for:", update.userId);
-  };
+  setUsers((prev) =>
+    prev.map((u) =>
+      u._id === update.userId
+        ? { ...u, pricingTiers: update.pricingTiers }
+        : u
+    )
+  );
+
+  // ✅ If currently selected teacher matches, refresh their data too
+  setSelectedTeacher((prev) => {
+    if (prev && (prev._id === update.userId || prev.id === update.userId)) {
+      return { ...prev, pricingTiers: update.pricingTiers };
+    }
+    return prev;
+  });
+
+  console.log("💰 Pricing updated for:", update.userId);
+};
+
 
   // Register all listeners
   socket.on("connect", onConnect);
@@ -449,16 +459,28 @@ setSelectedTeacher(null);
 
 };
 
-const openPricingForTeacher = (teacher: any) => {
-  const safeTeacher = {
-    ...teacher,
-    pricingTiers: Array.isArray(teacher?.pricingTiers)
-      ? teacher.pricingTiers
-      : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }],
-  };
-  setSelectedTeacher(safeTeacher);
-  setShowPricingModal(true);
+const openPricingForTeacher = async (teacher: any) => {
+  try {
+    // ✅ Optional: fetch latest data from backend
+    const res = await api.getMe(); // You can replace this with api.getUserById(teacher._id) if you have such an endpoint
+    const freshData = res?.user || teacher;
+
+    const safeTeacher = {
+      ...freshData,
+      pricingTiers: Array.isArray(freshData?.pricingTiers)
+        ? freshData.pricingTiers
+        : [{ minutes: 1, price: freshData?.ratePerMinute || 39 }],
+    };
+
+    setSelectedTeacher(safeTeacher);
+    setShowPricingModal(true);
+  } catch (err) {
+    console.error("Error fetching latest teacher data:", err);
+    setSelectedTeacher(teacher);
+    setShowPricingModal(true);
+  }
 };
+
 
 const handleConnect = (userId: string, rate: number, userObj?: any) => {
   const teacherLike =
