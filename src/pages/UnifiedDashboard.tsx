@@ -1167,7 +1167,13 @@ const getMinimumPrice = (minutes: number): number => {
   }
 
   try {
-    const res = await api.updatePricing(customDurations);
+    const cleanedTiers = customDurations.map((d) => ({
+  minutes: d.minutes,
+  price: d.price,
+}));
+
+const res = await api.updatePricing(cleanedTiers);
+
     if (res.success) {
       toast({
         title: "✅ Pricing Saved",
