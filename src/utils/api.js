@@ -33,6 +33,15 @@ export const getOnlineUsers = async () =>
 export const getMe = async () =>
   fetchJSON(`${API_BASE}/api/users/me`, { headers: getAuthHeaders() });
 
+// ✅ Update Pricing
+export const updatePricing = async (pricingTiers) =>
+  fetchJSON(`${API_BASE}/api/users/updatePricing`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ pricingTiers }),
+  });
+
+
 
 
 // 🔹 Create Razorpay Order
@@ -52,5 +61,5 @@ export const verifyPayment = async (data) =>
   });
 
 // ✅ Export everything
-const api = { getOnlineUsers, getMe, createOrder, verifyPayment };
+const api = { getOnlineUsers, getMe, createOrder, verifyPayment, updatePricing };
 export default api;

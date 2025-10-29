@@ -281,11 +281,24 @@ useEffect(() => {
     }
   };
 
+  // ✅ Listen for pricing updates in real time
+  const onPricingUpdate = (update: any) => {
+    setUsers((prev) =>
+      prev.map((u) =>
+        u._id === update.userId
+          ? { ...u, pricingTiers: update.pricingTiers }
+          : u
+      )
+    );
+    console.log("💰 Pricing updated for:", update.userId);
+  };
+
   // Register all listeners
   socket.on("connect", onConnect);
   socket.on("user:status", onUserStatus);
   socket.on("call:incoming", onIncoming);
   socket.on("call:response", onCallResponse);
+  socket.on("user:pricing:update", onPricingUpdate);
 
   // If already connected, call onConnect immediately
   if (socket.connected) {
@@ -300,6 +313,8 @@ useEffect(() => {
     socket.off("user:status", onUserStatus);
     socket.off("call:incoming", onIncoming);
     socket.off("call:response", onCallResponse);
+    socket.off("user:pricing:update", onPricingUpdate);
+
   };
 }, [socket]); // ✅ ONLY depend on socket object itself, not socket.connected
 
@@ -1116,7 +1131,7 @@ const getMinimumPrice = (minutes: number): number => {
           </div>
 
           <Button
-           onClick={() => {
+           onClick={async () => {
   const invalid = customDurations.some(
     (d) => d.price < getMinimumPrice(d.minutes)
   );
@@ -1129,14 +1144,41 @@ const getMinimumPrice = (minutes: number): number => {
     return;
   }
 
-  // 🧠 Here you can call backend API to update prices
-  // await api.updatePricing(customDurations);
+  try {
+    const res = await api.updatePricing(customDurations);
+    if (res.success) {
+      toast({
+        title: "✅ Pricing Saved",
+        description: "Your pricing has been updated successfully.",
+      });
 
-  setShowPricingSettings(false);
-  toast({
-    title: "Saved",
-    description: "Your pricing settings have been updated",
-  });
+      // Refresh the online users so others see new rate immediately
+      fetchOnlineUsers();
+
+      // Emit socket event manually (optional if backend does it)
+      if (socket && currentUser?._id) {
+        socket.emit("user:pricing:update", {
+          userId: currentUser._id,
+          pricingTiers: customDurations,
+        });
+      }
+
+      setShowPricingSettings(false);
+    } else {
+      toast({
+        title: "Error",
+        description: res.message || "Failed to update pricing.",
+        variant: "destructive",
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    toast({
+      title: "Server Error",
+      description: "Could not update pricing. Try again later.",
+      variant: "destructive",
+    });
+  }
 }}
 
           >
