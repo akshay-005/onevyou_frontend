@@ -71,7 +71,10 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
       ];
 
   // Get starting price (minimum price)
-  const startingPrice = Math.min(...pricingTiers.map(tier => tier.price || 0));
+  const startingPrice = pricingTiers.length
+  ? Math.min(...pricingTiers.map(tier => tier.price || 0))
+  : teacher.ratePerMinute || 39;
+
   
   // Get initials for avatar fallback
   const initials = displayName
