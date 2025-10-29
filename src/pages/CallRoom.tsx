@@ -22,7 +22,7 @@ const CallRoom: React.FC = () => {
   const hasJoinedRef = useRef(false);
   const cleanupDoneRef = useRef(false);
   const isCleaningUpRef = useRef(false);
-  const autoEndTimerRef = useRef<number | null>(null);
+  const autoEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
@@ -375,15 +375,16 @@ const clientAutoEnd = setTimeout(() => {
 
 // Store timeout to clear on manual end
 autoEndTimerRef.current = clientAutoEnd;
-      } catch (err: any) {
-        console.error("❌ Call failed:", err);
-        toast({ 
-          title: "Call Failed", 
-          description: err.message || "Unable to start call",
-          variant: "destructive" 
-        });
-        cleanup();
-      }
+     } } catch (err: any) {
+  console.error("❌ Call failed:", err);
+  toast({ 
+    title: "Call Failed", 
+    description: err?.message || "Unable to start call",
+    variant: "destructive"
+  });
+  cleanup();
+}
+
     };
 
     init();
