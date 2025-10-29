@@ -406,8 +406,15 @@ socket?.on("call:start", handleCallStart);
     // ✅ Handle call ended
 const handleCallEnded = () => {
   console.log("📞 Call ended by server");
-  cleanup();
+  
+  // ✅ Only cleanup if joined and not already in progress
+  if (!cleanupDoneRef.current && !isCleaningUpRef.current && hasJoinedRef.current) {
+    cleanup();
+  } else {
+    console.log("⚠️ Ignoring call:ended (already cleaned or not joined)");
+  }
 };
+
 
 socket?.on("call:ended", handleCallEnded);
 
@@ -428,15 +435,20 @@ useEffect(() => {
   if (!socket) return;
 
   const handleAccepted = () => {
-    console.log("✅ Call accepted");
-    document.querySelectorAll("audio").forEach(a => {
-      a.pause();
-      a.src = "";
-    });
-    if (role === "caller") {
-      setAccepted(true);
-    }
-  };
+  console.log("✅ Call accepted");
+  document.querySelectorAll("audio").forEach(a => {
+    a.pause();
+    a.src = "";
+  });
+
+  if (role === "caller") {
+    console.log("📞 Caller transitioning to accepted state...");
+    setAccepted(true);
+    hasJoinedRef.current = false; // ensure next effect triggers fresh join
+    cleanupDoneRef.current = false; // prevent false cleanup trigger
+  }
+};
+
 
   const handleRejected = () => {
     console.log("❌ Call rejected");
