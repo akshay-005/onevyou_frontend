@@ -487,24 +487,75 @@ setSelectedTeacher(null);
 
 };
 
+//  open Pricing For Teacher function 
+
 const openPricingForTeacher = async (teacher: any) => {
   try {
-    // ✅ Optional: fetch latest data from backend
-    const res = await api.getMe(); // You can replace this with api.getUserById(teacher._id) if you have such an endpoint
-    const freshData = res?.user || teacher;
+    console.log("🔍 Opening pricing modal for:", teacher.fullName || teacher.name);
+    console.log("📊 Current teacher data:", {
+      id: teacher._id,
+      tiers: teacher.pricingTiers,
+      rate: teacher.ratePerMinute
+    });
+
+    // ✅ Fetch FRESH data from backend to get latest pricing
+    const freshRes = await api.getOnlineUsers();
+    
+    let freshTeacher = teacher;
+    
+    if (freshRes?.success && Array.isArray(freshRes.users)) {
+      const found = freshRes.users.find((u: any) => 
+        u._id === teacher._id || u._id === teacher.id
+      );
+      
+      if (found) {
+        freshTeacher = found;
+        console.log("✅ Fetched fresh teacher data:", {
+          name: found.fullName,
+          tiers: found.pricingTiers,
+          rate: found.ratePerMinute
+        });
+      }
+    }
+
+    // ✅ Ensure pricingTiers is always an array
+    const pricingTiers = Array.isArray(freshTeacher?.pricingTiers) && freshTeacher.pricingTiers.length > 0
+      ? freshTeacher.pricingTiers
+      : [{ minutes: 1, price: freshTeacher?.ratePerMinute || 39 }];
+
+    console.log("💰 Final pricing tiers to display:", pricingTiers);
 
     const safeTeacher = {
-      ...freshData,
-      pricingTiers: Array.isArray(freshData?.pricingTiers)
-        ? freshData.pricingTiers
-        : [{ minutes: 1, price: freshData?.ratePerMinute || 39 }],
+      id: freshTeacher._id || freshTeacher.id,
+      _id: freshTeacher._id || freshTeacher.id,
+      name: freshTeacher.fullName || freshTeacher.name || "User",
+      rating: freshTeacher.rating || freshTeacher.profile?.rating || 4.8,
+      expertise: freshTeacher.skills?.[0] || freshTeacher.expertise || "Expert",
+      pricingTiers: pricingTiers.sort((a, b) => a.minutes - b.minutes),
+      ratePerMinute: freshTeacher.ratePerMinute || pricingTiers[0]?.price || 39
     };
 
+    console.log("🎯 Opening modal with teacher:", safeTeacher);
+    
     setSelectedTeacher(safeTeacher);
     setShowPricingModal(true);
   } catch (err) {
-    console.error("Error fetching latest teacher data:", err);
-    setSelectedTeacher(teacher);
+    console.error("❌ Error fetching latest teacher data:", err);
+    
+    // Fallback to existing data
+    const fallbackTiers = Array.isArray(teacher?.pricingTiers) && teacher.pricingTiers.length > 0
+      ? teacher.pricingTiers
+      : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }];
+    
+    setSelectedTeacher({
+      id: teacher._id || teacher.id,
+      _id: teacher._id || teacher.id,
+      name: teacher.fullName || teacher.name || "User",
+      rating: teacher.rating || 4.8,
+      expertise: teacher.skills?.[0] || "Expert",
+      pricingTiers: fallbackTiers,
+      ratePerMinute: teacher.ratePerMinute || 39
+    });
     setShowPricingModal(true);
   }
 };
@@ -1016,7 +1067,7 @@ const getMinimumPrice = (minutes: number): number => {
 
     
 
-      // REPLACE YOUR PRICING SETTINGS DIALOG IN UnifiedDashboard.tsx
+        {/*PRICING SETTINGS DIALOG*/} 
 
 <Dialog open={showPricingSettings} onOpenChange={setShowPricingSettings}>
   <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
