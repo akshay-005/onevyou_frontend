@@ -340,23 +340,23 @@ if (userId && channelName) {
 
         if (!mounted) return;
 
-        // Start local timer immediately
-startTimeRef.current = Date.now();
-timerRef.current = window.setInterval(() => {
-  setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
-}, 1000);
-
+        /// 🕒 Start timer only after synced "call:start" event from server
 setJoined(true);
+console.log("⏳ Waiting for server-synced start time...");
 
-
-        
-
-        // Notify backend
+// ✅ Notify backend only after socket is connected
 const userId = localStorage.getItem("userId");
-if (userId) {
- safeEmit("call:start", { channelName, userId, role });
-
+if (userId && socket) {
+  if (!socket.connected) {
+  console.log("⏳ Waiting for socket connection before emitting call:start...");
+  await new Promise<void>((resolve) => {
+    socket.once("connect", () => resolve());
+  });
 }
+
+console.log("📤 Emitting call:start to server...");
+safeEmit("call:start", { channelName, userId, role });
+
 
 // ✅ ADD THIS: Client-side auto-end enforcement
 const duration = durationMin || 1;
@@ -389,17 +389,31 @@ autoEndTimerRef.current = clientAutoEnd;
     init();
 
 
-    // ✅ Synced timer start from server event
+    // ✅ Synced timer start from server event (no drift)
 const handleCallStart = (data: any) => {
-  if (!startTimeRef.current) {
-    console.log("⏱️ Synced call start received from server");
-    startTimeRef.current = Date.now();
-    timerRef.current = window.setInterval(() => {
-      setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
-    setJoined(true);
-  }
+  const { startedAt } = data;
+  const serverStart = new Date(startedAt).getTime();
+  const now = Date.now();
+  const offset = now - serverStart;
+  const remaining = Math.max(0, CALL_DURATION_MS - offset);
+
+  console.log(`⏱️ Synced call start received. offset=${offset}ms, remaining=${remaining}ms`);
+
+  // Start UI timer from serverStart
+  startTimeRef.current = serverStart;
+  if (timerRef.current) clearInterval(timerRef.current);
+  timerRef.current = window.setInterval(() => {
+    setDurationSec(Math.floor((Date.now() - serverStart) / 1000));
+  }, 1000);
+
+  // Auto-end exactly at server time
+  if (autoEndTimerRef.current) clearTimeout(autoEndTimerRef.current);
+  autoEndTimerRef.current = window.setTimeout(() => {
+    console.log("⏰ Synced time's up — ending call");
+    cleanup();
+  }, remaining);
 };
+
 socket?.on("call:start", handleCallStart);
 
 
