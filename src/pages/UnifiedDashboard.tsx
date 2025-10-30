@@ -54,7 +54,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSocket } from "@/utils/socket";
 import api from "@/utils/api";
 
-
+import WalletCard from "@/components/WalletCard";
 import PricingModal from "@/components/PricingModal";
 import NotificationPanel from "@/components/NotificationPanel";
 import EarningsCard from "@/components/EarningsCard";
@@ -590,7 +590,7 @@ const handleConnect = (userId: string, rate: number, userObj?: any) => {
       facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedMessage}`,
       whatsapp: `https://wa.me/?text=${encodedMessage}%20${encodedUrl}`,
       linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
-    };
+    };  
 
     if (urls[platform]) window.open(urls[platform], "_blank");
   };
@@ -738,7 +738,7 @@ const getMinimumPrice = (minutes: number): number => {
                 <DropdownMenuSeparator />
 
                 <DropdownMenuItem onClick={() => setShowEarnings(true)}>
-                  <Wallet className="mr-2 h-4 w-4" /> Earnings
+                  <Wallet className="mr-2 h-4 w-4" /> Wallet & Earnings
                 </DropdownMenuItem>
 
                 <DropdownMenuItem onClick={() => setShowHistory(true)}>
@@ -1064,6 +1064,8 @@ const getMinimumPrice = (minutes: number): number => {
           onPaymentComplete={onPaymentComplete}
         />
       )}
+
+      
 
     
 
@@ -1395,13 +1397,16 @@ const getMinimumPrice = (minutes: number): number => {
 </Dialog>
 
       <Dialog open={showEarnings} onOpenChange={setShowEarnings}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Earnings</DialogTitle>
-          </DialogHeader>
-          <EarningsCard />
-        </DialogContent>
-      </Dialog>
+  <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+    <DialogHeader>
+      <DialogTitle>Wallet & Earnings</DialogTitle>
+    </DialogHeader>
+    <div className="space-y-6">
+      <WalletCard />
+      <EarningsCard />
+    </div>
+  </DialogContent>
+</Dialog>
 
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
         <DialogContent className="sm:max-w-xl">

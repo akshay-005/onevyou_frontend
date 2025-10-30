@@ -21,14 +21,20 @@ export default function EarningsCard() {
   };
 
   useEffect(() => {
-    fetchEarnings();
+  fetchEarnings();
 
-    // 🔁 Listen for dashboard refresh trigger
-    const handleRefresh = () => fetchEarnings();
-    window.addEventListener("refresh-dashboard", handleRefresh);
-    return () => window.removeEventListener("refresh-dashboard", handleRefresh);
-  }, []);
-
+  // Listen for dashboard refresh trigger
+  const handleRefresh = () => fetchEarnings();
+  window.addEventListener("refresh-dashboard", handleRefresh);
+  
+  // ✅ NEW: Also refresh on wallet updates
+  window.addEventListener("wallet-updated", handleRefresh);
+  
+  return () => {
+    window.removeEventListener("refresh-dashboard", handleRefresh);
+    window.removeEventListener("wallet-updated", handleRefresh);
+  };
+}, []);
   return (
     <Card className="shadow-md">
       <CardHeader>
