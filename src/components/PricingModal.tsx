@@ -217,6 +217,97 @@ if (paymentMethod === "wallet") {
     throw new Error("Order creation failed");
 
   // (⚙️ KEEP your existing Razorpay options and handler logic here — unchanged)
+  const order = orderRes.order;
+const userPhone = getUserPhone();
+const userName = currentUser?.fullName || currentUser?.name || "User";
+const userEmail = currentUser?.email || "user@example.com";
+
+console.log("💳 Payment order created:", {
+  minutes: tier.minutes,
+  price: tier.price,
+  teacher: teacher.name
+});
+
+const options = {
+  key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+  amount: order.amount,
+  currency: order.currency,
+  name: "ONEVYOU",
+  description: `${tier.minutes} minutes with ${teacher.name}`,
+  order_id: order.id,
+
+  handler: async function (response: any) {
+    try {
+      const verifyRes = await api.verifyPayment(response);
+      if (verifyRes.success) {
+        toast({
+          title: "Payment Successful!",
+          description: "Starting your video call...",
+        });
+        onPaymentComplete({
+          teacherId: teacher.id || teacher._id || teacher.name,
+          minutes: tier.minutes,
+          price: tier.price,
+        });
+      } else {
+        toast({
+          title: "Payment Verification Failed",
+          description: "Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      console.error("Payment verification error:", err);
+      toast({
+        title: "Verification Error",
+        description: "Could not verify payment",
+        variant: "destructive",
+      });
+    }
+  },
+
+  prefill: {
+    name: userName,
+    email: userEmail,
+    contact: userPhone,
+  },
+
+  theme: {
+    color: "#5a67d8",
+    backdrop_color: "rgba(0, 0, 0, 0.5)"
+  },
+
+  modal: {
+    ondismiss: function () {
+      toast({
+        title: "Payment Cancelled",
+        description: "You can try again anytime",
+      });
+    },
+  },
+
+  retry: { enabled: true, max_count: 3 },
+
+  notes: {
+    teacher_id: teacher.id || teacher._id,
+    duration: tier.minutes,
+    teacher_name: teacher.name
+  }
+};
+
+const rzp = new (window as any).Razorpay(options);
+
+rzp.on("payment.failed", function (response: any) {
+  console.error("Payment failed:", response.error);
+  toast({
+    title: "Payment Failed",
+    description: response.error.description || "Please try again",
+    variant: "destructive",
+  });
+});
+
+rzp.open();
+
 
     } catch (err) {
       console.error("❌ Payment Error:", err);
