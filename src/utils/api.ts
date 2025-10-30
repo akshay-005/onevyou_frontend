@@ -85,6 +85,14 @@ export const requestWithdrawal = async (amount: number, method: string) =>
     body: JSON.stringify({ amount, method }),
   });
 
+
+  export const useWalletForCall = async (data: any) =>
+  fetchJSON(`${API_BASE}/api/wallet/use-for-call`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
 // ===========================
 // DEFAULT EXPORT
 // ===========================
@@ -98,6 +106,7 @@ const api = {
   getWalletTransactions,
   updateBankDetails,
   requestWithdrawal,
+  useWalletForCall,
 };
 
 export default api;

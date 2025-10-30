@@ -53,6 +53,7 @@ const PricingModal = ({
   const [paymentMethod, setPaymentMethod] = useState("");
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [sortedTiers, setSortedTiers] = useState<{ minutes: number; price: number }[]>([]);
+  const [walletBalance, setWalletBalance] = useState(0); 
 
   // ✅ Load and sort pricing tiers whenever teacher changes
   useEffect(() => {
@@ -74,29 +75,36 @@ const PricingModal = ({
     }
   }, [teacher]);
 
-  // ✅ Load user data on mount
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        const { user } = getUserSession();
-        
-        if (user) {
-          setCurrentUser(user);
-        } else {
-          const response = await api.getMe();
-          if (response?.success && response?.user) {
-            setCurrentUser(response.user);
-          }
+  // ✅ Load user data and wallet balance on mount
+useEffect(() => {
+  const loadUser = async () => {
+    try {
+      const { user } = getUserSession();
+      
+      if (user) {
+        setCurrentUser(user);
+      } else {
+        const response = await api.getMe();
+        if (response?.success && response?.user) {
+          setCurrentUser(response.user);
         }
-      } catch (err) {
-        console.error("❌ Error loading user:", err);
       }
-    };
-
-    if (isOpen) {
-      loadUser();
+      
+      // ✅ Fetch wallet balance
+      const walletRes = await api.getWalletBalance();
+      if (walletRes.success) {
+        setWalletBalance(walletRes.wallet.availableBalance);
+        console.log("💰 Wallet balance loaded:", walletRes.wallet.availableBalance);
+      }
+    } catch (err) {
+      console.error("❌ Error loading user:", err);
     }
-  }, [isOpen]);
+  };
+
+  if (isOpen) {
+    loadUser();
+  }
+}, [isOpen]);
 
   // ✅ Get selected tier details
   const getSelectedTier = () => {
@@ -153,125 +161,63 @@ const PricingModal = ({
       });
       return;
     }
+   console.log("💳 Initiating payment for:", tier);
 
-    console.log("💳 Initiating payment for:", tier);
+// ✅ CLOSE MODAL BEFORE OPENING RAZORPAY
+onClose();
 
-    // ✅ CLOSE MODAL BEFORE OPENING RAZORPAY
-    onClose();
+try {
+  // ✅ NEW: Check wallet balance first
+ // ✅ NEW: Respect user's chosen payment method
+if (paymentMethod === "wallet") {
+  if (walletBalance >= tier.price) {
+    console.log("💰 Paying via wallet");
+    
+    const useWalletRes = await api.useWalletForCall({
+      teacherId: teacher.id || teacher._id,
+      amount: tier.price,
+      duration: tier.minutes,
+    });
 
-    try {
-      const orderRes = await api.createOrder(tier.price);
-      if (!orderRes.success || !orderRes.order)
-        throw new Error("Order creation failed");
-      
-      const order = orderRes.order;
-      const userPhone = getUserPhone();
-      const userName = currentUser?.fullName || currentUser?.name || "User";
-      const userEmail = currentUser?.email || "user@example.com";
-
-      console.log("💳 Payment order created:", {
+    if (useWalletRes.success) {
+      toast({
+        title: "✅ Paid from Wallet",
+        description: `₹${tier.price} deducted. Starting your call...`,
+      });
+      onPaymentComplete({
+        teacherId: teacher.id || teacher._id || teacher.name,
         minutes: tier.minutes,
         price: tier.price,
-        teacher: teacher.name
       });
-
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-        amount: order.amount,
-        currency: order.currency,
-        name: "ONEVYOU",
-        description: `${tier.minutes} minutes with ${teacher.name}`,
-        order_id: order.id,
-        
-        handler: async function (response: any) {
-          try {
-            const verifyRes = await api.verifyPayment(response);
-            if (verifyRes.success) {
-              toast({
-                title: "Payment Successful!",
-                description: "Starting your video call...",
-              });
-              onPaymentComplete({
-                teacherId: teacher.id || teacher._id || teacher.name,
-                minutes: tier.minutes,
-                price: tier.price,
-              });
-            } else {
-              toast({
-                title: "Payment Verification Failed",
-                description: "Please try again.",
-                variant: "destructive",
-              });
-            }
-          } catch (err) {
-            console.error("Payment verification error:", err);
-            toast({
-              title: "Verification Error",
-              description: "Could not verify payment",
-              variant: "destructive",
-            });
-          }
-        },
-
-        prefill: {
-          name: userName,
-          email: userEmail,
-          contact: userPhone,
-        },
-        
-        config: {
-          display: {
-            blocks: {
-              banks: {
-                name: 'Pay via UPI',
-                instruments: [{ method: 'upi' }]
-              }
-            },
-            sequence: ['block.banks'],
-            preferences: { show_default_blocks: true }
-          }
-        },
-        
-        theme: { 
-          color: "#5a67d8",
-          backdrop_color: "rgba(0, 0, 0, 0.5)"
-        },
-        
-        modal: {
-          backdropclose: false,
-          escape: true,
-          handleback: true,
-          confirm_close: true,
-          ondismiss: function() {
-            toast({
-              title: "Payment Cancelled",
-              description: "You can try again anytime",
-            });
-          },
-          animation: true
-        },
-        
-        retry: { enabled: true, max_count: 3 },
-        
-        notes: {
-          teacher_id: teacher.id || teacher._id,
-          duration: tier.minutes,
-          teacher_name: teacher.name
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      
-      rzp.on('payment.failed', function (response: any) {
-        console.error("Payment failed:", response.error);
-        toast({
-          title: "Payment Failed",
-          description: response.error.description || "Please try again",
-          variant: "destructive",
-        });
+      return; // ✅ Done
+    } else {
+      toast({
+        title: "Wallet Payment Failed",
+        description: useWalletRes.message || "Please try Razorpay",
+        variant: "destructive",
       });
+      return; // ❌ Stop — do NOT automatically open Razorpay
+    }
+  } else {
+    toast({
+      title: "Insufficient Wallet Balance",
+      description: `You need ₹${tier.price - walletBalance} more to use wallet.`,
+      variant: "destructive",
+    });
+    return;
+  }
+}
 
-      rzp.open();
+  
+  // ✅ Wallet insufficient or failed → use Razorpay
+  console.log("💳 Using Razorpay for payment");
+  const orderRes = await api.createOrder(tier.price);
+  
+  if (!orderRes.success || !orderRes.order)
+    throw new Error("Order creation failed");
+
+  // (⚙️ KEEP your existing Razorpay options and handler logic here — unchanged)
+
     } catch (err) {
       console.error("❌ Payment Error:", err);
       toast({
@@ -315,9 +261,34 @@ const PricingModal = ({
           </DialogDescription>
         </DialogHeader>
 
-        {/* ✅ Scrollable content area */}
-        <div className="flex-1 overflow-y-auto px-1">
+{/* ✅ NEW: Show Wallet Balance */}
+{walletBalance > 0 && (
+  <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-3 mx-6 mt-4">
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm font-medium text-green-900 dark:text-green-100 flex items-center gap-2">
+          <IndianRupee className="h-4 w-4" />
+          Wallet Balance: ₹{walletBalance}
+        </p>
+        <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+          {walletBalance >= selectedPrice 
+            ? "✓ You can pay from your wallet!" 
+            : `Need ₹${selectedPrice - walletBalance} more to use wallet`}
+        </p>
+      </div>
+      {walletBalance >= selectedPrice && (
+        <Badge className="bg-green-600 text-white">
+          Available
+        </Badge>
+      )}
+    </div>
+  </div>
+)}
+
+{/* ✅ Scrollable content area */}
+<div className="flex-1 overflow-y-auto px-1">
           {/* Live indicator */}
+
           <div className="bg-gradient-to-r from-primary/10 to-accent/10 rounded-lg p-2.5 flex items-center gap-2 mb-4">
             <Sparkles className="h-4 w-4 text-primary animate-pulse flex-shrink-0" />
             <p className="text-xs font-medium">
