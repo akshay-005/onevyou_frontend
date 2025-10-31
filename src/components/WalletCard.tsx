@@ -16,23 +16,30 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { Wallet, IndianRupee, TrendingUp, Clock, Download, CreditCard, Smartphone } from "lucide-react";
+import { Wallet, IndianRupee, TrendingUp, Clock, Download, CreditCard, Smartphone, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import { Badge } from "@/components/ui/badge";
 import { useSocket } from "@/utils/socket";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function WalletCard() {
   const { toast } = useToast();
   const socket = useSocket();
   
-  const [wallet, setWallet] = useState<any>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [wallet, setWallet] = useState(null);
+  const [transactions, setTransactions] = useState([]);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawMethod, setWithdrawMethod] = useState("upi");
   const [showBankSetup, setShowBankSetup] = useState(false);
+  const [withdrawalEligibility, setWithdrawalEligibility] = useState({
+    canWithdraw: false,
+    reason: "",
+    nextEligibleDate: null,
+    minAmount: 500
+  });
   const [bankDetails, setBankDetails] = useState({
     accountNumber: "",
     ifscCode: "",
@@ -57,10 +64,45 @@ export default function WalletCard() {
       const res = await api.getWalletTransactions();
       if (res.success) {
         setTransactions(res.transactions || []);
+        checkWithdrawalEligibility(res.transactions);
       }
     } catch (err) {
       console.error("Fetch transactions error:", err);
     }
+  };
+
+  // ✅ Check withdrawal eligibility based on ₹500/7-day rule
+  const checkWithdrawalEligibility = (txns) => {
+    const lastCredit = txns
+      .filter(t => t.type === "credit" && t.status === "completed")
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+
+    if (!lastCredit) {
+      setWithdrawalEligibility({
+        canWithdraw: false,
+        reason: "No earnings yet",
+        nextEligibleDate: null,
+        minAmount: 500
+      });
+      return;
+    }
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const lastCreditDate = new Date(lastCredit.createdAt);
+    const eligibleByDays = lastCreditDate < sevenDaysAgo;
+    
+    const daysRemaining = eligibleByDays 
+      ? 0 
+      : Math.ceil((7 - (Date.now() - lastCreditDate.getTime()) / (24 * 60 * 60 * 1000)));
+
+    setWithdrawalEligibility({
+      canWithdraw: eligibleByDays,
+      reason: eligibleByDays 
+        ? "You can withdraw any amount" 
+        : `Wait ${daysRemaining} more day${daysRemaining > 1 ? 's' : ''} or withdraw ₹500+`,
+      nextEligibleDate: eligibleByDays ? null : new Date(lastCreditDate.getTime() + 7 * 24 * 60 * 60 * 1000),
+      minAmount: eligibleByDays ? 1 : 500
+    });
   };
 
   useEffect(() => {
@@ -69,27 +111,42 @@ export default function WalletCard() {
     
     // Listen for wallet updates
     if (socket) {
-      socket.on("wallet:updated", (data: any) => {
-        fetchWallet();
-        fetchTransactions();
+      socket.on("wallet:updated", (data) => {
+        console.log("💰 Wallet updated event received:", data);
+        
+        // ✅ Force immediate refresh
+        setTimeout(() => {
+          fetchWallet();
+          fetchTransactions();
+        }, 500);
         
         if (data.isRefund) {
           toast({
-            title: "💸 Refund Received",
-            description: `₹${data.amount} has been added to your wallet. ${data.reason}`,
+            title: "💸 Instant Refund Received",
+            description: `₹${data.amount} added to your wallet. ${data.message || data.reason}`,
+            duration: 5000,
           });
         } else {
           toast({
-            title: "💰 Earnings Updated",
-            description: `You earned ₹${data.amount} from your last call!`,
+            title: "💰 Earnings Credited!",
+            description: `You earned ₹${data.amount} from your last call! Balance: ₹${data.newBalance}`,
+            duration: 5000,
           });
         }
+      });
+
+      // ✅ Also listen for dashboard refresh trigger
+      socket.on("refresh-dashboard", () => {
+        console.log("🔄 Dashboard refresh triggered");
+        fetchWallet();
+        fetchTransactions();
       });
     }
     
     return () => {
       if (socket) {
         socket.off("wallet:updated");
+        socket.off("refresh-dashboard");
       }
     };
   }, [socket]);
@@ -97,10 +154,20 @@ export default function WalletCard() {
   const handleWithdraw = async () => {
     const amount = parseFloat(withdrawAmount);
     
-    if (!amount || amount < wallet.withdrawalThreshold) {
+    if (!amount || amount <= 0) {
       toast({
         title: "Invalid Amount",
-        description: `Minimum withdrawal is ₹${wallet.withdrawalThreshold}`,
+        description: "Please enter a valid amount",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // ✅ Check eligibility rules
+    if (!withdrawalEligibility.canWithdraw && amount < 500) {
+      toast({
+        title: "Withdrawal Not Eligible",
+        description: withdrawalEligibility.reason,
         variant: "destructive",
       });
       return;
@@ -138,7 +205,7 @@ export default function WalletCard() {
       console.error("Withdrawal error:", err);
       toast({
         title: "Error",
-        description: "Something went wrong",
+        description: err.message || "Something went wrong",
         variant: "destructive",
       });
     }
@@ -166,7 +233,7 @@ export default function WalletCard() {
     }
   };
 
-  const formatDate = (date: string) => {
+  const formatDate = (date) => {
     return new Date(date).toLocaleDateString("en-IN", {
       day: "numeric",
       month: "short",
@@ -175,7 +242,7 @@ export default function WalletCard() {
     });
   };
 
-  const getTransactionIcon = (type: string) => {
+  const getTransactionIcon = (type) => {
     switch (type) {
       case "credit":
         return "💰";
@@ -218,14 +285,28 @@ export default function WalletCard() {
                   <IndianRupee className="h-6 w-6" />
                   {wallet.availableBalance.toFixed(0)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Min. withdrawal: ₹{wallet.withdrawalThreshold} 
-                </p>
+                
+                {/* ✅ Show withdrawal eligibility info */}
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-muted-foreground">
+                    Min. withdrawal: ₹{withdrawalEligibility.minAmount}
+                  </p>
+                  {!withdrawalEligibility.canWithdraw && withdrawalEligibility.nextEligibleDate && (
+                    <p className="text-xs text-orange-600 dark:text-orange-400">
+                      Full access: {formatDate(withdrawalEligibility.nextEligibleDate)}
+                    </p>
+                  )}
+                  {withdrawalEligibility.canWithdraw && (
+                    <p className="text-xs text-green-600 dark:text-green-400">
+                      ✓ You can withdraw any amount
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="flex flex-col gap-2">
                 <Button
                   onClick={() => setShowWithdraw(true)}
-                  disabled={wallet.availableBalance < wallet.withdrawalThreshold}
+                  disabled={wallet.availableBalance <= 0}
                   className="bg-green-600 hover:bg-green-700"
                   size="sm"
                 >
@@ -345,11 +426,32 @@ export default function WalletCard() {
           <DialogHeader>
             <DialogTitle>Withdraw Funds</DialogTitle>
             <DialogDescription>
-              Enter the amount you want to withdraw. Minimum: ₹{wallet.withdrawalThreshold}
+              {withdrawalEligibility.canWithdraw 
+                ? "You can withdraw any amount"
+                : `Minimum: ₹${withdrawalEligibility.minAmount} or wait ${withdrawalEligibility.reason}`}
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
+            {/* ✅ Eligibility Alert */}
+            {!withdrawalEligibility.canWithdraw && (
+              <Alert className="border-orange-500/50 bg-orange-50 dark:bg-orange-950/20">
+                <AlertCircle className="h-4 w-4 text-orange-600" />
+                <AlertDescription className="text-sm text-orange-900 dark:text-orange-100">
+                  <strong>Withdrawal Rules:</strong>
+                  <ul className="mt-2 space-y-1 list-disc list-inside">
+                    <li>Withdraw ₹500+ anytime</li>
+                    <li>OR wait 7 days after last earning to withdraw any amount</li>
+                  </ul>
+                  {withdrawalEligibility.nextEligibleDate && (
+                    <p className="mt-2 font-medium">
+                      Next eligible: {formatDate(withdrawalEligibility.nextEligibleDate)}
+                    </p>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div className="space-y-2">
               <Label>Amount</Label>
               <div className="relative">
@@ -360,7 +462,7 @@ export default function WalletCard() {
                   value={withdrawAmount}
                   onChange={(e) => setWithdrawAmount(e.target.value)}
                   className="pl-10"
-                  min={wallet.withdrawalThreshold}
+                  min={withdrawalEligibility.minAmount}
                   max={wallet.availableBalance}
                 />
               </div>
@@ -404,8 +506,9 @@ export default function WalletCard() {
               onClick={handleWithdraw}
               disabled={
                 !withdrawAmount ||
-                parseFloat(withdrawAmount) < wallet.withdrawalThreshold ||
-                parseFloat(withdrawAmount) > wallet.availableBalance
+                parseFloat(withdrawAmount) <= 0 ||
+                parseFloat(withdrawAmount) > wallet.availableBalance ||
+                (!withdrawalEligibility.canWithdraw && parseFloat(withdrawAmount) < 500)
               }
               className="flex-1 bg-green-600 hover:bg-green-700"
             >
