@@ -219,7 +219,7 @@ export default function WalletCard() {
                   {wallet.availableBalance.toFixed(0)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Min. withdrawal: ₹{wallet.withdrawalThreshold}
+                  Min. withdrawal: ₹{wallet.withdrawalThreshold} 
                 </p>
               </div>
               <div className="flex flex-col gap-2">
