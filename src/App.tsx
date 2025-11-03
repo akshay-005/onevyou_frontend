@@ -43,7 +43,7 @@ const App = () => {
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/help" element={<HelpSupport />} />
               <Route path="/call/:channelName" element={<CallRoom />} />
-              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/backoffice" element={<AdminDashboard />} />
 
               <Route
                 path="/profile-setup"
