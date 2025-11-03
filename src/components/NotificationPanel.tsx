@@ -55,7 +55,6 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
 
    socket.on("call:incoming", (data) => {
   console.log("📞 NotificationPanel received incoming call:", data);
-  console.log("Current requests before adding:", requests);
   
   const newRequest = {
     id: data.callId,
@@ -64,12 +63,19 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     price: data.price || 0,
     time: "Just now",
     subject: "Incoming Call",
-    channelName: data.channelName,           // ✅ STORE THIS
-    fromUserId: data.fromUserId,             // ✅ STORE THIS
-    durationMin: data.durationMin || 1,      // ✅ STORE THIS
+    channelName: data.channelName,
+    fromUserId: data.fromUserId,
+    durationMin: data.durationMin || 1,
   };
   
-  setLocalRequests((prev) => [newRequest, ...prev]);
+  setLocalRequests((prev) => {
+    const updated = [newRequest, ...prev];
+    
+    // ✅ Save to localStorage so it persists across refresh
+    localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
+    
+    return updated;
+  });
   
   // Play incoming sound
   const audio = new Audio("/sounds/incoming.mp3");
@@ -83,9 +89,19 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
 });
 
     socket.on("call:cancelled", ({ callId }) => {
-      setLocalRequests((prev) => prev.filter((r) => r.id !== callId));
-    });
-
+  // ✅ Remove from state AND localStorage
+  setLocalRequests((prev) => {
+    const updated = prev.filter((r) => r.id !== callId);
+    localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
+    return updated;
+  });
+  
+  // Stop ringtones
+  document.querySelectorAll("audio").forEach(a => {
+    a.pause();
+    a.src = "";
+  });
+});
     socket.on("call:timeout", ({ callId }) => {
       setLocalRequests((prev) => prev.filter((r) => r.id !== callId));
     });
@@ -108,7 +124,6 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     a.src = "";
   });
 
-  // Get stored call data from request
   const callData = requests.find(r => r.id === request.id);
   if (!callData) return;
 
@@ -119,29 +134,31 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     channelName: callData.channelName,
     callId: request.id,
   });
-  
 
   toast({
     title: "Call Request Accepted! 📞",
     description: `Starting video call with ${request.studentName}...`,
   });
 
-  // Remove from notifications
-  setLocalRequests((r) => r.filter((req) => req.id !== request.id));
+  // Remove from state AND localStorage
+  setLocalRequests((r) => {
+    const updated = r.filter((req) => req.id !== request.id);
+    localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
+    return updated;
+  });
 
-  // ✅ Dispatch with requestId
   window.dispatchEvent(new CustomEvent('call-request-handled', {
     detail: { requestId: request.id }
   }));
 
   // Navigate to call room
 
-  // Navigate to call room
   const duration = parseInt(request.duration) || 1;
   setTimeout(() => {
     window.location.href = `/call/${callData.channelName}?role=callee&callId=${request.id}&fromUserId=${callData.fromUserId}&duration=${duration}`;
   }, 500);
 };
+ 
 
   const handleDecline = (requestId: string) => {
   if (!socket) return;
@@ -155,7 +172,6 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     a.src = "";
   });
 
-  // Notify backend
   socket.emit("call:response", {
     toUserId: request.fromUserId,
     accepted: false,
@@ -169,12 +185,18 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     variant: "destructive",
   });
 
-   window.dispatchEvent(new CustomEvent('call-request-handled', {
+  window.dispatchEvent(new CustomEvent('call-request-handled', {
     detail: { requestId: requestId }
   }));
 
-  setLocalRequests((r) => r.filter((req) => req.id !== requestId));
+  // ✅ Remove from state AND localStorage
+  setLocalRequests((r) => {
+    const updated = r.filter((req) => req.id !== requestId);
+    localStorage.setItem("pendingCallRequests", JSON.stringify(updated));
+    return updated;
+  });
 };
+
   // Show connecting state inline instead of blocking entire panel
   const isConnecting = !socket || !isSocketReady;
 
@@ -182,6 +204,37 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     console.log("🔍 NotificationPanel - Requests:", requests.length);
     console.log("Socket ready:", isSocketReady);
   }, [requests, isSocketReady]);
+
+  // In NotificationPanel.tsx, ADD this useEffect to restore pending calls on refresh:
+
+useEffect(() => {
+  // ✅ Restore pending calls from localStorage on component mount
+  const restorePendingCalls = () => {
+    const savedCalls = localStorage.getItem("pendingCallRequests");
+    if (savedCalls) {
+      try {
+        const parsed = JSON.parse(savedCalls);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log("📥 Restoring", parsed.length, "pending call(s) after refresh");
+          setLocalRequests(parsed);
+          
+          // Resume playing incoming sound if calls exist
+          const audio = new Audio("/sounds/incoming.mp3");
+          audio.loop = true;
+          audio.play().catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Failed to restore pending calls:", err);
+        localStorage.removeItem("pendingCallRequests");
+      }
+    }
+  };
+
+  restorePendingCalls();
+}, []);
+
+
+
 
  return (
     <Card className="p-4 h-[500px] bg-gradient-to-br from-background to-primary/5">
