@@ -126,7 +126,8 @@ export default function CallHistory() {
                   <IndianRupee className="h-3 w-3" /> {call.price || 0}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {call.durationSec ? Math.round(call.durationSec / 60) : 0} min
+                  {Math.max(1, Math.round((call.durationSec || 0) / 60))} min
+
                 </p>
               </div>
             </div>
