@@ -19,6 +19,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import { SocketProvider } from "@/utils/socket";
 import SocketManager from "@/components/SocketManager";
 import "./utils/debugHelper";
+import AdminDashboard from "./pages/AdminDashboard";
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const App = () => {
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/help" element={<HelpSupport />} />
               <Route path="/call/:channelName" element={<CallRoom />} />
+              <Route path="/admin" element={<AdminDashboard />} />
 
               <Route
                 path="/profile-setup"
