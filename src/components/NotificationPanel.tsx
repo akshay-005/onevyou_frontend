@@ -9,6 +9,22 @@ import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useSocket } from "@/utils/socket";
 
+
+// ✅ Helper: Stop all ringtones safely
+function stopAllRingtones() {
+  const audios = document.querySelectorAll("audio");
+  audios.forEach((a) => {
+    try {
+      a.pause();
+      a.currentTime = 0;
+      a.src = "";
+    } catch (err) {
+      console.warn("⚠️ Error stopping ringtone:", err);
+    }
+  });
+}
+
+
 interface ConnectionRequest {
   id: string;
   studentName: string;
@@ -82,13 +98,69 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   });
 });
 
-    socket.on("call:cancelled", ({ callId }) => {
-      setLocalRequests((prev) => prev.filter((r) => r.id !== callId));
-    });
+   socket.on("call:cancelled", ({ callId, channelName }) => {
+  console.log("📵 Call cancelled received:", { callId, channelName });
+    stopAllRingtones(); // ✅ stop sound
+  setLocalRequests((prev) => 
+    prev.filter((r) => r.id !== callId && r.channelName !== channelName)
+  );
 
-    socket.on("call:timeout", ({ callId }) => {
-      setLocalRequests((prev) => prev.filter((r) => r.id !== callId));
-    });
+  // Stop ringtone
+  document.querySelectorAll("audio").forEach(a => {
+    a.pause();
+    a.src = "";
+  });
+
+  toast({
+    title: "Call Cancelled 🚫",
+    description: "The caller cancelled the call.",
+    variant: "destructive",
+  });
+});
+socket.on("call:cancelled", ({ callId, channelName }) => {
+  console.log("📵 Call cancelled received:", { callId, channelName });
+
+  setLocalRequests((prev) => 
+    prev.filter((r) => r.id !== callId && r.channelName !== channelName)
+  );
+  
+  console.log("📞 Active requests after update:", requests.map(r => r.id));
+
+
+  // Stop ringtone
+  document.querySelectorAll("audio").forEach(a => {
+    a.pause();
+    a.src = "";
+  });
+
+  toast({
+    title: "Call Cancelled 🚫",
+    description: "The caller cancelled the call.",
+    variant: "destructive",
+  });
+});
+
+
+    socket.on("call:timeout", ({ callId, channelName }) => {
+  console.log("⏰ Call timeout received:", { callId, channelName });
+
+   stopAllRingtones(); // ✅ stop sound
+  setLocalRequests((prev) => 
+    prev.filter((r) => r.id !== callId && r.channelName !== channelName)
+  );
+
+  document.querySelectorAll("audio").forEach(a => {
+    a.pause();
+    a.src = "";
+  });
+
+  toast({
+    title: "Call Timeout ⏰",
+    description: "The caller didn’t wait long enough.",
+    variant: "destructive",
+  });
+});
+
 
     return () => {
       socket.off("connect", handleConnect);
@@ -102,11 +174,8 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
  const handleAccept = (request: ConnectionRequest) => {
   if (!socket) return;
 
-  // Stop any ringtones
-  document.querySelectorAll("audio").forEach(a => {
-    a.pause();
-    a.src = "";
-  });
+ stopAllRingtones(); // ✅ stop all ringing
+
 
   // Get stored call data from request
   const callData = requests.find(r => r.id === request.id);
@@ -149,11 +218,8 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   const request = requests.find(r => r.id === requestId);
   if (!request) return;
 
-  // Stop ringtones
-  document.querySelectorAll("audio").forEach(a => {
-    a.pause();
-    a.src = "";
-  });
+  stopAllRingtones(); // ✅ stop all ringing
+
 
   // Notify backend
   socket.emit("call:response", {
