@@ -117,28 +117,6 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     variant: "destructive",
   });
 });
-socket.on("call:cancelled", ({ callId, channelName }) => {
-  console.log("📵 Call cancelled received:", { callId, channelName });
-
-  setLocalRequests((prev) => 
-    prev.filter((r) => r.id !== callId && r.channelName !== channelName)
-  );
-  
-  console.log("📞 Active requests after update:", requests.map(r => r.id));
-
-
-  // Stop ringtone
-  document.querySelectorAll("audio").forEach(a => {
-    a.pause();
-    a.src = "";
-  });
-
-  toast({
-    title: "Call Cancelled 🚫",
-    description: "The caller cancelled the call.",
-    variant: "destructive",
-  });
-});
 
 
     socket.on("call:timeout", ({ callId, channelName }) => {

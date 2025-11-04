@@ -20,6 +20,7 @@ import { SocketProvider } from "@/utils/socket";
 import SocketManager from "@/components/SocketManager";
 import "./utils/debugHelper";
 import AdminDashboard from "./pages/AdminDashboard";
+import ForgotPassword from "@/pages/auth/ForgotPassword";
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ const App = () => {
               <Route path="/help" element={<HelpSupport />} />
               <Route path="/call/:channelName" element={<CallRoom />} />
               <Route path="/backoffice" element={<AdminDashboard />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
 
               <Route
                 path="/profile-setup"
