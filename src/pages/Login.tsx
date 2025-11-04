@@ -97,7 +97,20 @@ const Login: React.FC = () => {
           {loading ? "Logging in..." : "Login"}
         </button>
       </form>
+
+      <div className="text-right text-sm mt-1">
+             <a
+              href="/forgot-password"
+              className="text-blue-500 hover:underline"
+  >
+                Forgot Password?
+              </a>
+            </div>
+
+
     </div>
+
+    
   );
 };
 
