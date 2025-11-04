@@ -20,7 +20,7 @@ import { SocketProvider } from "@/utils/socket";
 import SocketManager from "@/components/SocketManager";
 import "./utils/debugHelper";
 import AdminDashboard from "./pages/AdminDashboard";
-import ForgotPassword from "@/pages/auth/ForgotPassword";
+import ForgotPassword from "@/pages/ForgotPassword";
 
 const queryClient = new QueryClient();
 
