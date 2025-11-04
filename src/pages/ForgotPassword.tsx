@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Sparkles, MessageCircle } from "lucide-react";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://your-backend-url.onrender.com";
+const API_BASE = import.meta.env.VITE_API_URL || "https://onevyou.onrender.com";
 
 const ForgotPassword: React.FC = () => {
   const [identifier, setIdentifier] = useState(""); // email or phone
