@@ -426,6 +426,12 @@ const Auth = () => {
                     <Button type="submit" className="w-full" disabled={isLoading}>
                       {isLoading ? "Logging in..." : "Login"}
                     </Button>
+                    <div className="text-right text-sm mt-1">
+  <Link to="/forgot-password" className="text-primary hover:underline">
+    Forgot Password?
+  </Link>
+</div>
+
                   </>
                 ) : (
                   <>
@@ -640,7 +646,7 @@ const Auth = () => {
                   </Label>
                 </div>
 
-                <Button
+               {/*} <Button
                   type="submit"
                   className="w-full"
                   variant="accent"
@@ -656,7 +662,7 @@ const Auth = () => {
                       ? "Create account"
                       : "Send OTP First"
                     : "Sign Up"}
-                </Button>
+                </Button>*/}
               </form>
 
               <div className="relative">
@@ -678,14 +684,7 @@ const Auth = () => {
                   Apple
                 </Button>
               </div>
-              <div className="text-right text-sm mt-1">
-             <a
-              href="/forgot-password"
-              className="text-blue-500 hover:underline"
-  >
-                Forgot Password?
-              </a>
-            </div>
+        
 
             </TabsContent>
           </Tabs>
