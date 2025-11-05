@@ -646,7 +646,7 @@ const Auth = () => {
                   </Label>
                 </div>
 
-               {/*} <Button
+                <Button
                   type="submit"
                   className="w-full"
                   variant="accent"
@@ -662,7 +662,7 @@ const Auth = () => {
                       ? "Create account"
                       : "Send OTP First"
                     : "Sign Up"}
-                </Button>*/}
+                </Button>
               </form>
 
               <div className="relative">
