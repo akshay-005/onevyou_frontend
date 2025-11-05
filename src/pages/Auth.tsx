@@ -1,4 +1,4 @@
-// Auth.tsx
+// src/pages/Auth.tsx - REPLACE ENTIRE FILE
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,6 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { io, Socket } from "socket.io-client";
 import { storeUserSession } from "@/utils/storage";
-
 
 type AuthMethod = "email" | "phone";
 type UserType = "fan" | "creator";
@@ -45,7 +44,6 @@ const Auth = () => {
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
-  // endpoints
   const ENDPOINT = {
     sendOtp: `${API_BASE}/api/auth/send-otp`,
     verifyOtp: `${API_BASE}/api/auth/verify-otp`,
@@ -56,7 +54,6 @@ const Auth = () => {
   };
 
   useEffect(() => {
-    // preserve the behavior in your original file: set userType from location.state if provided
     if ((location as any).state?.userType) {
       setUserType((location as any).state.userType);
     }
@@ -77,225 +74,287 @@ const Auth = () => {
   };
 
   const checkUserExists = async (identifier: string) => {
-  try {
-    // Detect whether the identifier is email or phone
-    const payload = identifier.includes("@")
-      ? { email: identifier }
-      : { phoneNumber: identifier };
+    try {
+      const payload = identifier.includes("@")
+        ? { email: identifier }
+        : { phoneNumber: identifier };
 
-    const res = await fetch(ENDPOINT.checkUser, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload), // ✅ correct key now
-    });
+      const res = await fetch(ENDPOINT.checkUser, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-    const data = await res.json();
-    console.log("checkUser response:", data);
-    return data.exists === true;
-  } catch (err) {
-    console.warn("checkUserExists error", err);
-    return false;
-  }
-};
+      const data = await res.json();
+      console.log("checkUser response:", data);
+      return data.exists === true;
+    } catch (err) {
+      console.warn("checkUserExists error", err);
+      return false;
+    }
+  };
 
-
-  // SEND OTP used only for phone-based signup/login flows (keeps same backend contract)
+  // ✅ UPDATED: Send OTP for BOTH phone AND email
   const handleSendOTP = async () => {
     if (!fullName.trim()) {
-      toast({ title: "Name required", description: "Enter your full name", variant: "destructive" });
+      toast({ 
+        title: "Name required", 
+        description: "Enter your full name", 
+        variant: "destructive" 
+      });
       return;
     }
-    if (phoneNumber.trim().length < 6) {
-      toast({ title: "Invalid phone", description: "Enter a valid phone number", variant: "destructive" });
-      return;
+
+    // ✅ Validate based on authMethod
+    if (authMethod === "phone") {
+      if (phoneNumber.trim().length < 6) {
+        toast({ 
+          title: "Invalid phone", 
+          description: "Enter a valid phone number", 
+          variant: "destructive" 
+        });
+        return;
+      }
+    } else if (authMethod === "email") {
+      if (!email.includes("@")) {
+        toast({ 
+          title: "Invalid email", 
+          description: "Enter a valid email address", 
+          variant: "destructive" 
+        });
+        return;
+      }
     }
 
     setIsLoading(true);
     try {
-      const identifier = phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`;
+      // ✅ Prepare identifier based on method
+      const identifier = authMethod === "phone" 
+        ? (phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`)
+        : email;
 
+      // ✅ Check if user exists
       const exists = await checkUserExists(identifier);
       if (exists) {
-        toast({ title: "Account exists", description: "Use login instead.", variant: "destructive" });
+        toast({ 
+          title: "Account exists", 
+          description: "Use login instead.", 
+          variant: "destructive" 
+        });
         setIsLoading(false);
         return;
       }
 
+      // ✅ Prepare payload
+      const payload: any = {
+        userName: fullName,
+        authMethod
+      };
+
+      if (authMethod === "phone") {
+        payload.phoneNumber = identifier;
+      } else {
+        payload.email = identifier;
+      }
+
+      console.log("📤 Sending OTP request:", payload);
+
       const res = await fetch(ENDPOINT.sendOtp, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phoneNumber: identifier, userName: fullName }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
 
+      console.log("📥 OTP response:", data);
+
       if (res.ok && data.success) {
         setOtpSent(true);
-        toast({ title: "OTP Sent", description: `OTP sent to ${identifier}.` });
+        toast({ 
+          title: "OTP Sent", 
+          description: `OTP sent to your ${authMethod === "phone" ? "WhatsApp" : "email"}.` 
+        });
       } else {
-        toast({ title: "Failed to send OTP", description: data.message || "Try again later", variant: "destructive" });
+        toast({ 
+          title: "Failed to send OTP", 
+          description: data.message || "Try again later", 
+          variant: "destructive" 
+        });
       }
     } catch (err) {
       console.error("sendOtp error", err);
-      toast({ title: "Network error", description: "Could not reach server", variant: "destructive" });
+      toast({ 
+        title: "Network error", 
+        description: "Could not reach server", 
+        variant: "destructive" 
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // SIGNUP flow: email signup uses password directly; phone signup uses OTP verification first then register
+  // ✅ UPDATED: Signup for BOTH phone AND email with OTP verification
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!agreedToTerms) {
-      toast({ title: "Accept Terms", description: "Please agree to continue", variant: "destructive" });
+      toast({ 
+        title: "Accept Terms", 
+        description: "Please agree to continue", 
+        variant: "destructive" 
+      });
       return;
     }
 
-    // Email signup (no OTP required)
-    if (authMethod === "email") {
-      if (!fullName.trim()) {
-        toast({ title: "Name required", description: "Enter your full name", variant: "destructive" });
-        return;
-      }
-      if (!email.includes("@")) {
-        toast({ title: "Invalid email", description: "Enter a valid email", variant: "destructive" });
-        return;
-      }
-      if (!password || password.length < 6) {
-        toast({ title: "Weak password", description: "Use at least 6 characters", variant: "destructive" });
-        return;
-      }
-
-      setIsLoading(true);
-      try {
-        const payload: any = {
-          fullName,
-          password,
-          email,
-          roles: [userType],
-          verified: true, // email flow we mark verified if backend doesn't require verification
-          authMethod: "email",
-        };
-        const rres = await fetch(ENDPOINT.register, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const rdata = await rres.json();
-        if (rres.ok && rdata.success) {
-          storeUserSession(rdata.user, rdata.token);
-          localStorage.setItem("isOnline", "false"); // 🧩 start offline after signup
-
-          connectSocket(rdata.token);
-          toast({ title: "Welcome!", description: "Account created successfully." });
-          navigate("/profile-setup");
-        } else {
-          toast({ title: "Registration failed", description: rdata.message || "Try again", variant: "destructive" });
-        }
-      } catch (err) {
-        console.error("email signup error", err);
-        toast({ title: "Signup error", description: "Server error", variant: "destructive" });
-      } finally {
-        setIsLoading(false);
-      }
-
+    // ✅ Both methods now require OTP
+    if (!otpSent) {
+      toast({ 
+        title: "OTP required", 
+        description: "Send OTP first", 
+        variant: "destructive" 
+      });
       return;
     }
 
-    // Phone signup: verify OTP first, then register
-    if (authMethod === "phone") {
-      if (!otpSent) {
-        toast({ title: "OTP required", description: "Send OTP first", variant: "destructive" });
-        return;
-      }
-      if (!otp || otp.length < 4) {
-        toast({ title: "Invalid OTP", description: "Enter the OTP", variant: "destructive" });
-        return;
-      }
-      if (!password || password.length < 6) {
-        toast({ title: "Weak password", description: "Use at least 6 characters", variant: "destructive" });
-        return;
+    if (!otp || otp.length < 4) {
+      toast({ 
+        title: "Invalid OTP", 
+        description: "Enter the OTP", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    if (!password || password.length < 6) {
+      toast({ 
+        title: "Weak password", 
+        description: "Use at least 6 characters", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // ✅ Prepare identifier
+      const identifier = authMethod === "phone"
+        ? (phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`)
+        : email;
+
+      // ✅ Verify OTP first
+      const verifyPayload: any = { otp, authMethod };
+      if (authMethod === "phone") {
+        verifyPayload.phoneNumber = identifier;
+      } else {
+        verifyPayload.email = identifier;
       }
 
-      setIsLoading(true);
-      try {
-        const identifier = phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`;
+      console.log("📤 Verifying OTP:", verifyPayload);
 
-        // Verify OTP
-        const vres = await fetch(ENDPOINT.verifyOtp, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phoneNumber: identifier, otp }),
+      const vres = await fetch(ENDPOINT.verifyOtp, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(verifyPayload),
+      });
+      const vdata = await vres.json();
+
+      console.log("📥 OTP verification response:", vdata);
+
+      if (!vres.ok || !vdata.valid) {
+        toast({ 
+          title: "Invalid OTP", 
+          description: vdata.message || "Please check code", 
+          variant: "destructive" 
         });
-        const vdata = await vres.json();
-        if (!vres.ok || !vdata.valid) {
-          toast({ title: "Invalid OTP", description: vdata.message || "Please check code", variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
-
-        // Register
-        const payload: any = {
-          fullName,
-          password,
-          roles: [userType],
-          verified: true,
-          authMethod: "phone",
-          phoneNumber: identifier,
-        };
-
-        const rres = await fetch(ENDPOINT.register, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const rdata = await rres.json();
-
-        if (rres.ok && rdata.success) {
-  // 🧠 Debug log for testing
-  console.log("✅ Registered user object (phone signup):", rdata.user);
-
-  // Normalize if backend sends `id` not `_id`
-  if (rdata.user && !rdata.user._id && rdata.user.id) {
-    rdata.user._id = rdata.user.id;
-  }
-
-  // ✅ Save user and token
-  storeUserSession(rdata.user, rdata.token);
-  // 🧩 Force toggle OFF initially after signup
-  localStorage.setItem("isOnline", "false");
-
-  connectSocket(rdata.token);
-  toast({ title: "Welcome!", description: "Account created successfully." });
-  navigate("/profile-setup");
-}
-
-
-         else {
-          toast({ title: "Registration failed", description: rdata.message || "Try again", variant: "destructive" });
-        }
-      } catch (err) {
-        console.error("phone signup error", err);
-        toast({ title: "Signup error", description: "Server error", variant: "destructive" });
-      } finally {
         setIsLoading(false);
+        return;
       }
+
+      // ✅ Register user after OTP verification
+      const registerPayload: any = {
+        fullName,
+        password,
+        roles: [userType],
+        verified: true,
+        authMethod
+      };
+
+      if (authMethod === "phone") {
+        registerPayload.phoneNumber = identifier;
+      } else {
+        registerPayload.email = identifier;
+      }
+
+      console.log("📤 Registering user:", registerPayload);
+
+      const rres = await fetch(ENDPOINT.register, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(registerPayload),
+      });
+      const rdata = await rres.json();
+
+      console.log("📥 Registration response:", rdata);
+
+      if (rres.ok && rdata.success) {
+        console.log("✅ Registered user object:", rdata.user);
+
+        // Normalize user ID
+        if (rdata.user && !rdata.user._id && rdata.user.id) {
+          rdata.user._id = rdata.user.id;
+        }
+
+        storeUserSession(rdata.user, rdata.token);
+        localStorage.setItem("isOnline", "false");
+
+        connectSocket(rdata.token);
+        toast({ 
+          title: "Welcome!", 
+          description: "Account created successfully." 
+        });
+        navigate("/profile-setup");
+      } else {
+        toast({ 
+          title: "Registration failed", 
+          description: rdata.message || "Try again", 
+          variant: "destructive" 
+        });
+      }
+    } catch (err) {
+      console.error("signup error", err);
+      toast({ 
+        title: "Signup error", 
+        description: "Server error", 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // LOGIN: uses identifier (phone or email) + password
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const identifier = authMethod === "phone" ? (phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`) : email;
+      const identifier = authMethod === "phone" 
+        ? (phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`) 
+        : email;
 
       if (!identifier) {
-        toast({ title: "Missing identifier", description: "Enter email or phone", variant: "destructive" });
+        toast({ 
+          title: "Missing identifier", 
+          description: "Enter email or phone", 
+          variant: "destructive" 
+        });
         setIsLoading(false);
         return;
       }
       if (!password) {
-        toast({ title: "Missing password", description: "Enter password", variant: "destructive" });
+        toast({ 
+          title: "Missing password", 
+          description: "Enter password", 
+          variant: "destructive" 
+        });
         setIsLoading(false);
         return;
       }
@@ -308,21 +367,31 @@ const Auth = () => {
       const data = await res.json();
 
       if (res.ok && data.success) {
-  storeUserSession(data.user, data.token);  // ✅ simplified helper
-  localStorage.setItem("isOnline", "false"); // 🧩 force offline on login
-  console.log("✅ User object received:", data.user);
-  console.log("✅ Token:", data.token);
+        storeUserSession(data.user, data.token);
+        localStorage.setItem("isOnline", "false");
+        console.log("✅ User object received:", data.user);
+        console.log("✅ Token:", data.token);
 
-  connectSocket(data.token);
-  toast({ title: "Logged in", description: `Welcome back, ${data.user.fullName}` });
-  navigate(data.user.profileComplete ? "/dashboard" : "/profile-setup");
-
+        connectSocket(data.token);
+        toast({ 
+          title: "Logged in", 
+          description: `Welcome back, ${data.user.fullName}` 
+        });
+        navigate(data.user.profileComplete ? "/dashboard" : "/profile-setup");
       } else {
-        toast({ title: "Login failed", description: data.message || "Invalid credentials", variant: "destructive" });
+        toast({ 
+          title: "Login failed", 
+          description: data.message || "Invalid credentials", 
+          variant: "destructive" 
+        });
       }
     } catch (err) {
       console.error("login error", err);
-      toast({ title: "Login error", description: "Server not reachable", variant: "destructive" });
+      toast({ 
+        title: "Login error", 
+        description: "Server not reachable", 
+        variant: "destructive" 
+      });
     } finally {
       setIsLoading(false);
     }
@@ -334,7 +403,6 @@ const Auth = () => {
     <div className="min-h-screen bg-gradient-to-br from-primary/10 via-accent/5 to-primary/10 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/20 via-background to-background" />
 
-      {/* Decorative floating icons */}
       <div className="absolute top-20 left-20 animate-pulse">
         <Sparkles className="h-8 w-8 text-primary/40" />
       </div>
@@ -365,7 +433,7 @@ const Auth = () => {
               <TabsTrigger value="signup">Sign Up</TabsTrigger>
             </TabsList>
 
-            {/* LOGIN */}
+            {/* LOGIN TAB */}
             <TabsContent value="login" className="space-y-4 mt-6">
               <div className="flex gap-2 mb-4">
                 <Button
@@ -426,12 +494,12 @@ const Auth = () => {
                     <Button type="submit" className="w-full" disabled={isLoading}>
                       {isLoading ? "Logging in..." : "Login"}
                     </Button>
+                    
                     <div className="text-right text-sm mt-1">
-  <Link to="/forgot-password" className="text-primary hover:underline">
-    Forgot Password?
-  </Link>
-</div>
-
+                      <Link to="/forgot-password" className="text-primary hover:underline">
+                        Forgot Password?
+                      </Link>
+                    </div>
                   </>
                 ) : (
                   <>
@@ -470,6 +538,12 @@ const Auth = () => {
                     <Button type="submit" className="w-full" disabled={isLoading}>
                       {isLoading ? "Logging in..." : "Login"}
                     </Button>
+                    
+                    <div className="text-right text-sm mt-1">
+                      <Link to="/forgot-password" className="text-primary hover:underline">
+                        Forgot Password?
+                      </Link>
+                    </div>
                   </>
                 )}
               </form>
@@ -495,13 +569,16 @@ const Auth = () => {
               </div>
             </TabsContent>
 
-            {/* SIGNUP */}
+            {/* SIGNUP TAB */}
             <TabsContent value="signup" className="space-y-4 mt-6">
               <div className="flex gap-2 mb-4">
                 <Button
                   variant={authMethod === "phone" ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setAuthMethod("phone")}
+                  onClick={() => {
+                    setAuthMethod("phone");
+                    setOtpSent(false); // Reset OTP state when switching
+                  }}
                   className="flex-1"
                 >
                   <Phone className="mr-2 h-4 w-4" />
@@ -510,7 +587,10 @@ const Auth = () => {
                 <Button
                   variant={authMethod === "email" ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setAuthMethod("email")}
+                  onClick={() => {
+                    setAuthMethod("email");
+                    setOtpSent(false); // Reset OTP state when switching
+                  }}
                   className="flex-1"
                 >
                   <Mail className="mr-2 h-4 w-4" />
@@ -609,21 +689,44 @@ const Auth = () => {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-password">Password</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          id="signup-password"
-                          type="password"
-                          placeholder="Create a password"
-                          className="pl-10"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
+                    {/* ✅ Email now has same flow as phone */}
+                    {!otpSent ? (
+                      <Button type="button" onClick={handleSendOTP} className="w-full" variant="accent" disabled={isLoading}>
+                        {isLoading ? "Sending..." : "Send OTP"}
+                      </Button>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <Label htmlFor="signup-otp-email">Enter OTP</Label>
+                          <Input
+                            id="signup-otp-email"
+                            type="text"
+                            placeholder="Enter 6-digit OTP"
+                            value={otp}
+                            onChange={(e) => setOtp(e.target.value)}
+                            maxLength={6}
+                            className="pl-3"
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="signup-password">Create Password</Label>
+                          <div className="relative">
+                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              id="signup-password"
+                              type="password"
+                              placeholder="Create a password"
+                              className="pl-10"
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              required
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -650,18 +753,13 @@ const Auth = () => {
                   type="submit"
                   className="w-full"
                   variant="accent"
-                  disabled={
-                    isLoading ||
-                    (authMethod === "phone" && !otpSent) // require sending OTP first for phone signup
-                  }
+                  disabled={isLoading || !otpSent}
                 >
                   {isLoading
                     ? "Processing..."
-                    : authMethod === "phone"
-                    ? otpSent
-                      ? "Create account"
-                      : "Send OTP First"
-                    : "Sign Up"}
+                    : otpSent
+                    ? "Create Account"
+                    : "Send OTP First"}
                 </Button>
               </form>
 
@@ -684,8 +782,6 @@ const Auth = () => {
                   Apple
                 </Button>
               </div>
-        
-
             </TabsContent>
           </Tabs>
         </div>
