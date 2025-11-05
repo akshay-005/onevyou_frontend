@@ -7,7 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
-import Login from "./pages/Login";
+//import Login from "./pages/Login";
 import ProfileSetup from "./pages/ProfileSetup";
 import UnifiedDashboard from "./pages/UnifiedDashboard";
 import CallRoom from "./pages/CallRoom";
@@ -39,7 +39,7 @@ const App = () => {
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/auth" element={<Auth />} />
-              <Route path="/login" element={<Login />} />
+              <Route path="/login" element={<Auth/>} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/help" element={<HelpSupport />} />

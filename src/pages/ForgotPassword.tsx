@@ -62,7 +62,8 @@ const ForgotPassword: React.FC = () => {
 
       if (res.ok && data.success) {
         toast({ title: "Password Reset", description: "You can now log in with your new password" });
-        navigate("/login");
+        // ✅ FIXED: Navigate to /auth instead of /login
+        navigate("/auth");
       } else {
         toast({ title: "Failed", description: data.message || "Invalid OTP", variant: "destructive" });
       }
@@ -113,7 +114,7 @@ const ForgotPassword: React.FC = () => {
             <p className="text-center text-sm mt-2 text-muted-foreground">
               Remembered your password?{" "}
               <span
-                onClick={() => navigate("/login")}
+                onClick={() => navigate("/auth")}
                 className="text-primary hover:underline cursor-pointer"
               >
                 Back to Login
