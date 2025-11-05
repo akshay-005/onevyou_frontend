@@ -398,6 +398,8 @@ const Auth = () => {
   };
 
   const handleGoogleSignIn = () => (window.location.href = ENDPOINT.googleAuth);
+  const handleAppleSignIn = () => (window.location.href = `${API_BASE}/api/auth/apple`);
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/10 via-accent/5 to-primary/10 flex items-center justify-center p-4">
@@ -562,10 +564,15 @@ const Auth = () => {
                   <Chrome className="mr-2 h-4 w-4" />
                   Google
                 </Button>
-                <Button variant="outline" onClick={() => toast({ title: "Apple Sign in", description: "Not wired up yet" })} className="hover:scale-105 transition-transform">
-                  <Apple className="mr-2 h-4 w-4" />
-                  Apple
-                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleAppleSignIn}
+                  className="hover:scale-105 transition-transform"
+>
+                   <Apple className="mr-2 h-4 w-4" />
+                      Apple
+                    </Button>
+
               </div>
             </TabsContent>
 
