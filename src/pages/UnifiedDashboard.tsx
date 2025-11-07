@@ -141,23 +141,28 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     let mounted = true;
     api
       .getMe()
-      .then((res) => {
-        if (!mounted) return;
-        if (res?.success) {
-          setCurrentUser(res.user);
-          if (!userManuallyToggled.current && !initialLoadComplete.current) {
-    // 🚫 Always default to offline after login/signup
-    const saved = localStorage.getItem("isOnline");
-    const restored = saved === "true"; // only restore if user explicitly chose ON before
-    const finalState = restored ? true : false; // otherwise stay offline
-    console.log("Initial load: forcing isOnline =", finalState);
-    setIsOnline(finalState);
-    initialLoadComplete.current = true;
-  }
+        .then((res) => {
+    if (!mounted) return;
+    if (res?.success) {
+      setCurrentUser(res.user);
 
+      if (!userManuallyToggled.current && !initialLoadComplete.current) {
+        const saved = localStorage.getItem("isOnline");
+        const restored = saved === "true";
+        const finalState = restored ? true : false;
+        console.log("Initial load: forcing isOnline =", finalState);
+        setIsOnline(finalState);
+        initialLoadComplete.current = true;
+      }
 
-        }
-      })
+      // ✅ NEW: Always fetch online users once after login (even if user is offline)
+      setTimeout(() => {
+        console.log("🔄 Initial fetch of online users after login");
+        fetchOnlineUsers();
+      }, 500);
+    }
+  })
+
       .catch((err) => {
         console.error("getMe error:", err);
         initialLoadComplete.current = true;
