@@ -88,10 +88,9 @@
 
     // UI state
   // 🧩 Always start offline by default
-  const [isOnline, setIsOnline] = useState<boolean>(() => {
-    const saved = localStorage.getItem("isOnline");
-    return saved === "true" ? true : false; // will still respect saved state
-  });
+  // Always start offline unless user explicitly toggles
+const [isOnline, setIsOnline] = useState<boolean>(false);
+
 
 
     const [searchTerm, setSearchTerm] = useState("");
@@ -822,6 +821,10 @@ const onWalletUpdated = (data: any) => {
       
       // 3. Clear any other app-specific data
       localStorage.removeItem("lastVisited");
+
+      // ✅ Force offline state after logout
+      localStorage.setItem("isOnline", "false");
+
       
       // 4. Show toast
       toast({ 

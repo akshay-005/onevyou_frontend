@@ -28,8 +28,13 @@ const AuthSuccess = () => {
 
         const data = await res.json();
         if (res.ok && data.success) {
-          // ✅ Save full user session (if you use this helper in your app)
-          storeUserSession(data.user, token);
+          // ✅ Save full user session
+      storeUserSession(data.user, token);
+
+      // ✅ Always reset online state after login (Google or others)
+      localStorage.setItem("isOnline", "false");
+      console.log("🧊 User logged in — starting offline");
+
 
           // ✅ Decide where to go
           if (data.user.profileCompleted) {
