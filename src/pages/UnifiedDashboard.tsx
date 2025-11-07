@@ -252,25 +252,51 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     };
 
-    const onUserStatus = (update: any) => {
-      const myUserId = currentUser?._id || localStorage.getItem("userId");
-      console.log("user:status event", update, "myUserId:", myUserId);
+   const onUserStatus = async (update: any) => {
+  const myUserId = currentUser?._id || localStorage.getItem("userId");
+  console.log("user:status event", update, "myUserId:", myUserId);
 
-      // ✅ If this is OUR status update and we manually toggled, don't override local state
-      if (update.userId === myUserId && userManuallyToggled.current) {
-        console.log("Ignoring our own status broadcast (manual toggle in progress)");
-        return;
-      }
+  // Ignore own broadcast during manual toggle
+  if (update.userId === myUserId && userManuallyToggled.current) {
+    console.log("Ignoring our own status broadcast (manual toggle in progress)");
+    return;
+  }
 
-      setUsers((prev) => {
-        const updated = prev.map((u) =>
-          u._id === update.userId ? { ...u, online: update.isOnline } : u
-        );
-        const onlineUsers = updated.filter((u) => u.online);
-        setOnlineCount(onlineUsers.length);
-        return updated;
-      });
-    };
+  setUsers((prev) => {
+    const exists = prev.some((u) => u._id === update.userId);
+    let updated = prev;
+
+    if (exists) {
+      // ✅ Update existing user’s online status
+      updated = prev.map((u) =>
+        u._id === update.userId ? { ...u, online: update.isOnline } : u
+      );
+    } else if (update.isOnline) {
+      // ✅ NEW: If new user just came online, fetch and add them dynamically
+      fetch(`${import.meta.env.VITE_API_URL || "https://onevyou.onrender.com"}/api/users/online`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("userToken")}`,
+        },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.users)) {
+            const newUser = data.users.find((u) => u._id === update.userId);
+            if (newUser) {
+              setUsers((prevList) => [...prevList, newUser]);
+              console.log("✨ Added newly online user:", newUser.fullName || newUser._id);
+            }
+          }
+        })
+        .catch((err) => console.error("❌ Failed to fetch new online user:", err));
+    }
+
+    const onlineUsers = updated.filter((u) => u.online);
+    setOnlineCount(onlineUsers.length);
+    return updated;
+  });
+};
+
 
   const onIncoming = (payload: any) => {
       console.log("📞 Dashboard received incoming call:", payload);
