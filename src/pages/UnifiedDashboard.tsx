@@ -87,7 +87,6 @@
 
 
     // UI state
-  // 🧩 Always start offline by default
   // Always start offline unless user explicitly toggles
 // ✅ Restore saved toggle from localStorage (if exists)
 const [isOnline, setIsOnline] = useState<boolean>(() => {
@@ -467,10 +466,14 @@ const onWalletUpdated = (data: any) => {
     // ✅ Fetch fresh online users after going online
     setTimeout(() => fetchOnlineUsers(), 200);
   } else {
-    toast({ title: "You're now Offline" });
-    setUsers([]);
-    setShowShareDialog(false);
-  }
+  toast({ title: "You're now Offline" });
+  setShowShareDialog(false);
+
+  // ✅ Still show others even if you go offline
+  // Just refresh list instead of clearing it
+  setTimeout(() => fetchOnlineUsers(), 300);
+}
+
 
     // ✅ Reset the ref after a short delay to allow state sync
     setTimeout(() => {
