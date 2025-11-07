@@ -8,16 +8,53 @@ const AuthSuccess = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
-    if (token) {
-      localStorage.setItem("token", token);
-      // optional: fetch user info using token
-      navigate("/dashboard");
-    } else {
+
+    if (!token) {
       navigate("/login");
+      return;
     }
+
+    // Save token immediately
+    localStorage.setItem("userToken", token);
+
+    // ✅ Fetch user info using the token
+    const fetchUser = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || "https://onevyou.onrender.com"}/api/users/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          // ✅ Save full user session (if you use this helper in your app)
+          storeUserSession(data.user, token);
+
+          // ✅ Decide where to go
+          if (data.user.profileCompleted) {
+            navigate("/dashboard");
+          } else {
+            navigate("/profile-setup");
+          }
+        } else {
+          console.warn("Failed to fetch user info:", data.message);
+          navigate("/dashboard");
+        }
+      } catch (err) {
+        console.error("Error fetching user info:", err);
+        navigate("/dashboard");
+      }
+    };
+
+    fetchUser();
   }, [navigate]);
 
-  return <div className="text-center mt-10">Signing you in...</div>;
+  return (
+    <div className="min-h-screen flex items-center justify-center text-center text-lg font-medium">
+      Signing you in securely...
+    </div>
+  );
 };
 
 export default AuthSuccess;
