@@ -89,7 +89,12 @@
     // UI state
   // 🧩 Always start offline by default
   // Always start offline unless user explicitly toggles
-const [isOnline, setIsOnline] = useState<boolean>(false);
+// ✅ Restore saved toggle from localStorage (if exists)
+const [isOnline, setIsOnline] = useState<boolean>(() => {
+  const saved = localStorage.getItem("isOnline");
+  return saved === "true"; // restore previous state
+});
+
 
 
 
