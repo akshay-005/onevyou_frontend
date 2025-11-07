@@ -19,7 +19,7 @@ const Index = () => {
       <div className="container mx-auto px-4 pt-20 pb-16">
         <div className="text-center max-w-4xl mx-auto">
           <div className="mb-8">
-            <img src="/lovable-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png" alt="ONEVYOU" className="h-16 mx-auto mb-4" />
+            <img src="/onevyou-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png" alt="ONEVYOU" className="h-16 mx-auto mb-4" />
             <h2 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">ONEVYOU</h2>
           </div>
           <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-primary bg-clip-text text-transparent">
