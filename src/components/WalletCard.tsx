@@ -371,48 +371,56 @@ export default function WalletCard() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {transactions.slice(0, 10).map((txn, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{getTransactionIcon(txn.type)}</span>
-                        <div>
-                          <p className="text-sm font-medium">
-                            {txn.description || txn.type}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatDate(txn.createdAt)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p
-                          className={`text-sm font-bold ${
-                            txn.type === "credit" || txn.type === "refund"
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {txn.type === "credit" || txn.type === "refund" ? "+" : "-"}₹
-                          {Math.abs(txn.amount).toFixed(0)}
-                        </p>
-                        <Badge
-                          variant={
-                            txn.status === "completed"
-                              ? "default"
-                              : txn.status === "pending"
-                              ? "secondary"
-                              : "destructive"
-                          }
-                          className="text-xs"
-                        >
-                          {txn.status}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
+                 {transactions
+  // ✅ Hide only platform commission transactions
+  .filter((txn) => 
+    !txn.description?.toLowerCase().includes("platform commission")
+  )
+  .slice(0, 10)
+  .map((txn, i) => (
+    <div
+      key={i}
+      className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+    >
+      <div className="flex items-center gap-3">
+        <span className="text-2xl">{getTransactionIcon(txn.type)}</span>
+        <div>
+          <p className="text-sm font-medium">
+            {txn.description || txn.type}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {formatDate(txn.createdAt)}
+          </p>
+        </div>
+      </div>
+      <div className="text-right">
+        <p
+          className={`text-sm font-bold ${
+            txn.type === "credit" || txn.type === "refund"
+              ? "text-green-600"
+              : "text-red-600"
+          }`}
+        >
+          {txn.type === "credit" || txn.type === "refund" ? "+" : "-"}₹
+          {Math.abs(txn.amount).toFixed(0)}
+        </p>
+        <Badge
+          variant={
+            txn.status === "completed"
+              ? "default"
+              : txn.status === "pending"
+              ? "secondary"
+              : "destructive"
+          }
+          className="text-xs"
+        >
+          {txn.status}
+        </Badge>
+      </div>
+    </div>
+  ))}
+
+
                 </div>
               )}
             </ScrollArea>
