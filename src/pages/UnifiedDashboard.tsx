@@ -272,24 +272,43 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
         u._id === update.userId ? { ...u, online: update.isOnline } : u
       );
     } else if (update.isOnline) {
-      // ✅ NEW: If new user just came online, fetch and add them dynamically
-      fetch(`${import.meta.env.VITE_API_URL || "https://onevyou.onrender.com"}/api/users/online`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("userToken")}`,
-        },
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && Array.isArray(data.users)) {
-            const newUser = data.users.find((u) => u._id === update.userId);
-            if (newUser) {
-              setUsers((prevList) => [...prevList, newUser]);
-              console.log("✨ Added newly online user:", newUser.fullName || newUser._id);
+  // ✅ Fetch updated info for the newly online user
+  fetch(`${import.meta.env.VITE_API_URL || "https://onevyou.onrender.com"}/api/users/online`, {
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem("userToken")}`,
+    },
+  })
+    .then((res) => res.json())
+    .then((data) => {
+      if (data.success && Array.isArray(data.users)) {
+        const newUser = data.users.find((u) => u._id === update.userId);
+        if (newUser) {
+          setUsers((prevList) => {
+            const exists = prevList.some((u) => u._id === newUser._id);
+            let updated;
+            if (exists) {
+              updated = prevList.map((u) =>
+                u._id === newUser._id ? { ...u, online: true } : u
+              );
+            } else {
+              updated = [...prevList, { ...newUser, online: true }];
             }
-          }
-        })
-        .catch((err) => console.error("❌ Failed to fetch new online user:", err));
-    }
+
+            // ✅ Deduplicate to be 100% safe
+            const unique = updated.filter(
+              (u, index, self) => index === self.findIndex((x) => x._id === u._id)
+            );
+
+            setOnlineCount(unique.filter((u) => u.online).length);
+            return unique;
+          });
+          console.log("✨ Added or updated online user:", newUser.fullName || newUser._id);
+        }
+      }
+    })
+    .catch((err) => console.error("❌ Failed to fetch new online user:", err));
+}
+
 
     const onlineUsers = updated.filter((u) => u.online);
     setOnlineCount(onlineUsers.length);
