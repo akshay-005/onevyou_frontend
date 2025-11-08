@@ -29,7 +29,7 @@ async function fetchJSON(url: string, options: RequestInit = {}) {
 // USER APIs
 // ===========================
 export const getOnlineUsers = async () =>
-  fetchJSON(`${API_BASE}/api/users/online`, { headers: getAuthHeaders() });
+  fetchJSON(`${API_BASE}/api/users/all`, { headers: getAuthHeaders() });
 
 export const getMe = async () =>
   fetchJSON(`${API_BASE}/api/users/me`, { headers: getAuthHeaders() });
