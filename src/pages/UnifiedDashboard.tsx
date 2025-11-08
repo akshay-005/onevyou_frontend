@@ -121,7 +121,7 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     // Share link & sorting/filtering
     const [shareLink, setShareLink] = useState("");
-    const [sortBy, setSortBy] = useState("name");
+    const [sortBy, setSortBy] = useState("all");
     const [filterBy, setFilterBy] = useState("all");
 
     // Teacher selection (for PricingModal)
@@ -675,54 +675,64 @@ const onWalletUpdated = (data: any) => {
     };
 
     // Filter & sort
-    const filteredUsers = useMemo(() => {
-    let list = users.filter((u) => {
-      // Search by name, bio, AND skills
-      const name = u.fullName || u.profile?.name || u.phoneNumber || "User";
-      const bio = u.bio || u.profile?.bio || u.about || "";
-      const skillsText = Array.isArray(u.skills) 
-        ? u.skills.join(" ").toLowerCase() 
-        : (u.profile?.skills || []).join(" ").toLowerCase();
-      
-      const searchLower = searchTerm.toLowerCase();
-      
-      // Match if search term found in name, bio, or skills
-      return (
-        name.toLowerCase().includes(searchLower) ||
-        bio.toLowerCase().includes(searchLower) ||
-        skillsText.includes(searchLower)
-      );
+   const filteredUsers = useMemo(() => {
+  let list = users.filter((u) => {
+    // Search by name, bio, AND skills
+    const name = u.fullName || u.profile?.name || u.phoneNumber || "User";
+    const bio = u.bio || u.profile?.bio || u.about || "";
+    const skillsText = Array.isArray(u.skills) 
+      ? u.skills.join(" ").toLowerCase() 
+      : (u.profile?.skills || []).join(" ").toLowerCase();
+    
+    const searchLower = searchTerm.toLowerCase();
+    
+    // Match if search term found in name, bio, or skills
+    return (
+      name.toLowerCase().includes(searchLower) ||
+      bio.toLowerCase().includes(searchLower) ||
+      skillsText.includes(searchLower)
+    );
+  });
+
+  // Filter by category/expertise
+  if (filterBy !== "all") {
+    list = list.filter((u) => {
+      const skills = Array.isArray(u.skills) ? u.skills : (u.profile?.skills || []);
+      const skillsText = skills.join(" ").toLowerCase();
+      return skillsText.includes(filterBy.toLowerCase());
     });
+  }
 
-    // Filter by category/expertise
-    if (filterBy !== "all") {
-      list = list.filter((u) => {
-        const skills = Array.isArray(u.skills) ? u.skills : (u.profile?.skills || []);
-        const skillsText = skills.join(" ").toLowerCase();
-        return skillsText.includes(filterBy.toLowerCase());
-      });
-    }
+  // ✅ NEW SORTING LOGIC
+  if (sortBy === "all") {
+    // Default: sort by name
+    list.sort((a, b) => (a.fullName || "").localeCompare(b.fullName || ""));
+  } else if (sortBy === "online") {
+    // Online users first, then by name
+    list.sort((a, b) => {
+      if (a.online === b.online) {
+        return (a.fullName || "").localeCompare(b.fullName || "");
+      }
+      return a.online ? -1 : 1;
+    });
+  } else if (sortBy === "rating") {
+    // Highest rated first
+    list.sort((a, b) => {
+      const ratingA = a.rating || a.profile?.rating || 0;
+      const ratingB = b.rating || b.profile?.rating || 0;
+      return ratingB - ratingA;
+    });
+  } else if (sortBy === "rate-high") {
+    // Highest price first
+    list.sort((a, b) => (b.ratePerMinute || 0) - (a.ratePerMinute || 0));
+  } else if (sortBy === "rate-low") {
+    // Lowest price first
+    list.sort((a, b) => (a.ratePerMinute || 0) - (b.ratePerMinute || 0));
+  }
 
-    // Sorting
-    if (sortBy === "rate-high") {
-      list.sort((a, b) => (b.ratePerMinute || 0) - (a.ratePerMinute || 0));
-    } else if (sortBy === "rate-low") {
-      list.sort((a, b) => (a.ratePerMinute || 0) - (b.ratePerMinute || 0));
-    } else if (sortBy === "skill") {
-      // Sort by first skill alphabetically
-      list.sort((a, b) => {
-        const skillA = Array.isArray(a.skills) ? a.skills[0] : "";
-        const skillB = Array.isArray(b.skills) ? b.skills[0] : "";
-        return (skillA || "").localeCompare(skillB || "");
-      });
-    } else {
-      // Default: sort by name
-      list.sort((a, b) => (a.fullName || "").localeCompare(b.fullName || ""));
-    }
-
-    console.log("Filtered users:", list.length, "Sort:", sortBy, "Filter:", filterBy);
-    return list;
-  }, [users, searchTerm, sortBy, filterBy]);
+  console.log("Filtered users:", list.length, "Sort:", sortBy, "Filter:", filterBy);
+  return list;
+}, [users, searchTerm, sortBy, filterBy]);
 
 
   // 🧮 Helper to get minimum allowed price
@@ -959,7 +969,7 @@ const onWalletUpdated = (data: any) => {
                   <SelectValue placeholder="Filter" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="all">All Field</SelectItem>
                   <SelectItem value="web">Web Development</SelectItem>
                   <SelectItem value="math">Mathematics</SelectItem>
                   <SelectItem value="design">Design</SelectItem>
@@ -968,15 +978,17 @@ const onWalletUpdated = (data: any) => {
               </Select>
 
               <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name">Name</SelectItem>
-                  <SelectItem value="rate-high">Rate: High → Low</SelectItem>
-                  <SelectItem value="rate-low">Rate: Low → High</SelectItem>
-                </SelectContent>
-              </Select>
+  <SelectTrigger className="w-[160px]">
+    <SelectValue placeholder="Sort by" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="all">All Users</SelectItem>
+    <SelectItem value="online">Online First</SelectItem>
+    <SelectItem value="rating">Highest Rated</SelectItem>
+    <SelectItem value="rate-low">Price: Low to High</SelectItem>
+    <SelectItem value="rate-high">Price: High to Low</SelectItem>
+  </SelectContent>
+</Select>
             </div>
           </div>
 
