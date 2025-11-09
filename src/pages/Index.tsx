@@ -35,7 +35,7 @@ const Index = () => {
               onClick={handleJoinAsFan}
               className="text-lg px-8 bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
             >
-              Get Started 💖
+              Get Started 
             </Button>
             {/*<Button 
               size="lg" 

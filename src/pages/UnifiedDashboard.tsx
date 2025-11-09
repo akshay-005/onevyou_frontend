@@ -257,13 +257,13 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     };
 
-   const onUserStatus = async (update: any) => {
+  const onUserStatus = async (update: any) => {
   const myUserId = currentUser?._id || localStorage.getItem("userId");
-  console.log("user:status event", update, "myUserId:", myUserId);
+  console.log("📡 user:status event", update, "myUserId:", myUserId);
 
   // Ignore own broadcast during manual toggle
   if (update.userId === myUserId && userManuallyToggled.current) {
-    console.log("Ignoring our own status broadcast (manual toggle in progress)");
+    console.log("⏭️ Ignoring our own status broadcast (manual toggle in progress)");
     return;
   }
 
@@ -272,55 +272,80 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     let updated = prev;
 
     if (exists) {
-      // ✅ Update existing user’s online status
-      updated = prev.map((u) =>
-        u._id === update.userId ? { ...u, online: update.isOnline } : u
-      );
-    } else if (update.isOnline) {
-  // ✅ Fetch updated info for the newly online user
-  fetch(`${import.meta.env.VITE_API_URL || "https://onevyou.onrender.com"}/api/users/online`, {
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem("userToken")}`,
-    },
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data.success && Array.isArray(data.users)) {
-        const newUser = data.users.find((u) => u._id === update.userId);
-        if (newUser) {
-          setUsers((prevList) => {
-            const exists = prevList.some((u) => u._id === newUser._id);
-            let updated;
-            if (exists) {
-              updated = prevList.map((u) =>
-                u._id === newUser._id ? { ...u, online: true } : u
-              );
-            } else {
-              updated = [...prevList, { ...newUser, online: true }];
-            }
-
-            // ✅ Deduplicate to be 100% safe
-            const unique = updated.filter(
-              (u, index, self) => index === self.findIndex((x) => x._id === u._id)
-            );
-
-            setOnlineCount(unique.filter((u) => u.online).length);
-            return unique;
-          });
-          console.log("✨ Added or updated online user:", newUser.fullName || newUser._id);
+      // ✅ Update existing user's online status
+      updated = prev.map((u) => {
+        if (u._id === update.userId) {
+          // Merge fresh data if available from broadcast
+          if (update.userData) {
+            return {
+              ...u,
+              online: update.isOnline,
+              fullName: update.userData.fullName || u.fullName,
+              profileImage: update.userData.profileImage || u.profileImage,
+              bio: update.userData.bio || u.bio,
+              skills: update.userData.skills || u.skills,
+              socialMedia: update.userData.socialMedia || u.socialMedia,
+              ratePerMinute: update.userData.ratePerMinute || u.ratePerMinute,
+              pricingTiers: update.userData.pricingTiers || u.pricingTiers,
+              rating: update.userData.rating || u.rating,
+            };
+          } else {
+            return { ...u, online: update.isOnline };
+          }
         }
-      }
-    })
-    .catch((err) => console.error("❌ Failed to fetch new online user:", err));
-}
+        return u;
+      });
+      console.log(`✅ Updated existing user ${update.userId}: online=${update.isOnline}`);
+    } else if (update.isOnline && update.userData) {
+      // ✅ Add new user directly from broadcast data
+      const newUser = {
+        ...update.userData,
+        online: true,
+      };
+      updated = [...prev, newUser];
+      console.log("✨ Added new online user from broadcast:", newUser.fullName || newUser._id);
+    } else if (update.isOnline && !update.userData) {
+      // ✅ Fallback: Fetch user data if not included in broadcast
+      console.log("⚠️ No userData in broadcast, fetching from API...");
+      fetch(`${import.meta.env.VITE_API_URL || "https://onevyou.onrender.com"}/api/users/all`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("userToken")}`,
+        },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.users)) {
+            const newUser = data.users.find((u) => u._id === update.userId);
+            if (newUser) {
+              setUsers((prevList) => {
+                const exists = prevList.some((u) => u._id === newUser._id);
+                if (!exists) {
+                  return [...prevList, { ...newUser, online: true }];
+                }
+                return prevList.map((u) =>
+                  u._id === newUser._id ? { ...u, online: true } : u
+                );
+              });
+              console.log("✨ Fetched and added new user:", newUser.fullName || newUser._id);
+            }
+          }
+        })
+        .catch((err) => console.error("❌ Failed to fetch new online user:", err));
+    }
 
+    // ✅ Deduplicate to be safe
+    const unique = updated.filter(
+      (u, index, self) => index === self.findIndex((x) => x._id === u._id)
+    );
 
-    const onlineUsers = updated.filter((u) => u.online);
+    // ✅ Update online count
+    const onlineUsers = unique.filter((u) => u.online);
     setOnlineCount(onlineUsers.length);
-    return updated;
+    
+    console.log(`📊 Total users: ${unique.length}, Online: ${onlineUsers.length}`);
+    return unique;
   });
 };
-
 
   const onIncoming = (payload: any) => {
       console.log("📞 Dashboard received incoming call:", payload);
