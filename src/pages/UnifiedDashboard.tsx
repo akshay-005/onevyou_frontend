@@ -779,149 +779,284 @@ const onWalletUpdated = (data: any) => {
         />
 
         {/* Header */}
-<header className="bg-card/60 backdrop-blur-xl border-b border-border/50 sticky top-0 z-40 shadow-sm">
-  <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
-
-    {/* Left side: logo + name */}
-    <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-start">
-      <div className="flex items-center gap-2">
-        <img
-          src="/onevyou-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
-          alt="ONEVYOU"
-          className="h-8 sm:h-9"
-        />
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight bg-gradient-primary bg-clip-text text-transparent">
-          ONEVYOU
-        </h1>
-      </div>
-
-      {/* ✅ Mobile toggle */}
-      <div className="flex sm:hidden items-center gap-2">
-        <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
-        {isOnline && (
-          <div className="relative w-3 h-3">
-            <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
-            <div className="absolute inset-1 bg-green-400 rounded-full"></div>
-          </div>
-        )}
-      </div>
-    </div>
-
-    {/* Right side (visible only on larger screens) */}
-    <div className="hidden sm:flex items-center gap-4">
-      <div className="flex items-center gap-3">
-        <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
-        {isOnline && (
-          <div className="relative w-3 h-3">
-            <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
-            <div className="absolute inset-1 bg-green-400 rounded-full"></div>
-          </div>
-        )}
-        <Label>{isOnline ? "Online" : "Offline"}</Label>
-      </div>
-
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => setShowNotifications(true)}
-        className="relative"
-      >
-        <Bell className="h-5 w-5" />
-        {pendingRequests > 0 && (
-          <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
-            {pendingRequests}
-          </Badge>
-        )}
-      </Button>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon">
-            <Avatar className="h-8 w-8">
-              {currentUser?.profileImage ? (
-                <AvatarImage
-                  src={currentUser.profileImage}
-                  alt={currentUser.fullName}
-                />
-              ) : (
-                <AvatarFallback>
-                  {currentUser?.fullName
-                    ? currentUser.fullName.charAt(0).toUpperCase()
-                    : "U"}
-                </AvatarFallback>
-              )}
-            </Avatar>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
-          <DropdownMenuLabel>
-            <div className="font-medium">
-              {currentUser?.fullName || "Your Profile"}
-            </div>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-
-          <DropdownMenuItem onClick={() => setShowEarnings(true)}>
-            <Wallet className="mr-2 h-4 w-4" /> Wallet & Earnings
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={() => setShowHistory(true)}>
-            <Share2 className="mr-2 h-4 w-4" /> Call History
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={() => setShowPricingSettings(true)}>
-            <IndianRupee className="mr-2 h-4 w-4" /> Set Pricing
-          </DropdownMenuItem>
-
-          <DropdownMenuItem
-            onClick={() => navigate("/profile-setup?edit=true")}
-          >
-            <Settings className="mr-2 h-4 w-4" /> Edit Profile
-          </DropdownMenuItem>
-
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => window.open("/help", "_blank")}>
-            <HelpCircle className="mr-2 h-4 w-4" /> Help & Support
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => window.open("/privacy", "_blank")}>
-            <Shield className="mr-2 h-4 w-4" /> Privacy Policy
-          </DropdownMenuItem>
-
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="text-destructive"
-            onClick={() => {
-              if (
-                confirm(
-                  "Are you sure you want to delete your account? This action cannot be undone."
-                )
-              ) {
-                toast({ title: "Account deletion requested" });
-              }
-            }}
-          >
-            <Trash2 className="mr-2 h-4 w-4" /> Delete Account
-          </DropdownMenuItem>
-
-          <DropdownMenuItem
-            onClick={() => {
-              if (socket) disconnectSocket();
-              clearUserSession();
-              localStorage.setItem("isOnline", "false");
-              toast({
-                title: "Logged Out",
-                description: "You have been logged out successfully",
-              });
-              setTimeout(() => navigate("/", { replace: true }), 500);
-            }}
-          >
-            <LogOut className="mr-2 h-4 w-4" /> Logout
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+        <header className="bg-card/60 backdrop-blur-xl border-b border-border/50 sticky top-0 z-40 shadow-sm">
+          <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between">
+  {/* Left: Logo and Name */}
+  <div className="flex items-center gap-2 sm:gap-3">
+    <img
+      src="/onevyou-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
+      alt="ONEVYOU"
+      className="h-8 sm:h-9"
+    />
+    <h1 className="text-xl sm:text-2xl font-bold tracking-tight bg-gradient-primary bg-clip-text text-transparent whitespace-nowrap">
+      ONEVYOU
+    </h1>
   </div>
-</header>
+
+  {/* Right: Toggle + Notifications + Profile */}
+  <div className="flex items-center gap-3 sm:gap-4 flex-wrap justify-end w-auto sm:w-auto">
+    {/* Toggle */}
+    <div className="flex items-center gap-2">
+      <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
+      {isOnline && (
+        <div className="relative w-3 h-3">
+          <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
+          <div className="absolute inset-1 bg-green-400 rounded-full"></div>
+        </div>
+      )}
+      <Label className="hidden sm:inline">{isOnline ? "Online" : "Offline"}</Label>
+    </div>
+
+    {/* Notifications */}
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setShowNotifications(true)}
+      className="relative"
+    >
+      <Bell className="h-5 w-5" />
+      {pendingRequests > 0 && (
+        <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
+          {pendingRequests}
+        </Badge>
+      )}
+    </Button>
+
+    {/* Profile dropdown (kept visible) */}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <Avatar className="h-8 w-8">
+            {currentUser?.profileImage ? (
+              <AvatarImage
+                src={currentUser.profileImage}
+                alt={currentUser.fullName}
+              />
+            ) : (
+              <AvatarFallback>
+                {currentUser?.fullName
+                  ? currentUser.fullName.charAt(0).toUpperCase()
+                  : "U"}
+              </AvatarFallback>
+            )}
+          </Avatar>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72">
+        {/* Keep all dropdown items as is */}
+        <DropdownMenuLabel>
+          <div className="font-medium">
+            {currentUser?.fullName || "Your Profile"}
+          </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setShowEarnings(true)}>
+          <Wallet className="mr-2 h-4 w-4" /> Wallet & Earnings
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setShowHistory(true)}>
+          <Share2 className="mr-2 h-4 w-4" /> Call History
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setShowPricingSettings(true)}>
+          <IndianRupee className="mr-2 h-4 w-4" /> Set Pricing
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate("/profile-setup?edit=true")}>
+          <Settings className="mr-2 h-4 w-4" /> Edit Profile
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => window.open("/help", "_blank")}>
+          <HelpCircle className="mr-2 h-4 w-4" /> Help & Support
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => window.open("/privacy", "_blank")}>
+          <Shield className="mr-2 h-4 w-4" /> Privacy Policy
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="text-destructive"
+          onClick={() => {
+            if (confirm("Are you sure you want to delete your account?")) {
+              toast({ title: "Account deletion requested" });
+            }
+          }}
+        >
+          <Trash2 className="mr-2 h-4 w-4" /> Delete Account
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            if (socket) disconnectSocket();
+            clearUserSession();
+            localStorage.setItem("isOnline", "false");
+            toast({
+              title: "Logged Out",
+              description: "You have been logged out successfully",
+            });
+            setTimeout(() => navigate("/", { replace: true }), 500);
+          }}
+        >
+          <LogOut className="mr-2 h-4 w-4" /> Logout
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  </div>
+</div>
+
+            <div className="flex items-center gap-3">
+              <img
+                src="/onevyou-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
+                alt="ONEVYOU"
+                className="h-9"
+              />
+              <h1 className="text-2xl font-bold tracking-tight bg-gradient-primary bg-clip-text text-transparent">
+                ONEVYOU
+              </h1>
+            </div>
+
+            <div className="flex items-center gap-4">
+            {/* Online toggle with green blink indicator */}
+  <div className="flex items-center gap-3">
+    <div className="relative flex items-center gap-2">
+      <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
+      {isOnline && (
+        <div className="relative w-3 h-3">
+          <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
+          <div className="absolute inset-1 bg-green-400 rounded-full"></div>
+        </div>
+      )}
+    </div>
+    <Label>{isOnline ? "Online" : "Offline"}</Label>
+  </div>
+
+              {/* Notifications */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowNotifications(true)}
+                className="relative"
+              >
+                <Bell className="h-5 w-5" />
+                {pendingRequests > 0 && (
+                  <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
+                    {pendingRequests}
+                  </Badge>
+                )}
+              </Button>
+
+              {/* Profile dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <Avatar className="h-8 w-8">
+                      {currentUser?.profileImage ? (
+                        <AvatarImage
+                          src={currentUser.profileImage}
+                          alt={currentUser.fullName}
+                        />
+                      ) : (
+                        <AvatarFallback>
+                          {currentUser?.fullName
+                            ? currentUser.fullName.charAt(0).toUpperCase()
+                            : "U"}
+                        </AvatarFallback>
+                      )}
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent align="end" className="w-72">
+                  <DropdownMenuLabel>
+                    <div className="font-medium">
+                      {currentUser?.fullName || "Your Profile"}
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+
+                  <DropdownMenuItem onClick={() => setShowEarnings(true)}>
+                    <Wallet className="mr-2 h-4 w-4" /> Wallet & Earnings
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem onClick={() => setShowHistory(true)}>
+                    <Share2 className="mr-2 h-4 w-4" /> Call History
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem onClick={() => setShowPricingSettings(true)}>
+                    <IndianRupee className="mr-2 h-4 w-4" /> Set Pricing 
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => navigate("/profile-setup?edit=true")}
+                  >
+                    <Settings className="mr-2 h-4 w-4" /> Edit Profile
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() =>
+                      window.open("/help", "_blank")
+                    }
+                  >
+                    <HelpCircle className="mr-2 h-4 w-4" /> Help & Support
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => window.open("/privacy", "_blank")}
+                  >
+                    <Shield className="mr-2 h-4 w-4" /> Privacy Policy
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "Are you sure you want to delete your account? This action cannot be undone."
+                        )
+                      ) {
+                        toast({ title: "Account deletion requested" });
+                      }
+                    }}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete Account
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+    onClick={() => {
+      console.log("🚪 Logging out...");
+      
+      // 1. Disconnect socket first
+      if (socket) {
+        console.log("🔌 Disconnecting socket...");
+        disconnectSocket();
+      }
+      
+      // 2. Clear all session data
+      clearUserSession();
+      
+      // 3. Clear any other app-specific data
+      localStorage.removeItem("lastVisited");
+
+      // ✅ Force offline state after logout
+      localStorage.setItem("isOnline", "false");
+
+      
+      // 4. Show toast
+      toast({ 
+        title: "Logged Out", 
+        description: "You have been logged out successfully" 
+      });
+      
+      // 5. Redirect to home with slight delay for toast to show
+      setTimeout(() => {
+        navigate("/", { replace: true });
+      }, 500);
+    }}
+  >
+    <LogOut className="mr-2 h-4 w-4" /> Logout
+  </DropdownMenuItem>
+
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </header>
 
         
 
