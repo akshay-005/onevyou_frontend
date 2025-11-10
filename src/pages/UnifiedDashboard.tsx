@@ -1,6 +1,7 @@
   // frontend/src/pages/UnifiedDashboard.tsx
   import React, { useEffect, useState, useMemo, useRef } from "react";
   import { useNavigate } from "react-router-dom";
+  import { useIsMobile } from "@/hooks/use-mobile"; 
   import {
     Avatar,
     AvatarImage,
@@ -73,6 +74,7 @@
     const navigate = useNavigate();
     const { toast } = useToast();
     const socket = useSocket();
+    const isMobile = useIsMobile(); 
 
       // ✅ Listen for global toast events (e.g., reconnect notification)
     useEffect(() => {
@@ -779,69 +781,74 @@ const onWalletUpdated = (data: any) => {
         />
 
         {/* Header */}
-        <header className="bg-card/60 backdrop-blur-xl border-b border-border/50 sticky top-0 z-40 shadow-sm">
-          <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <img
-                src="/onevyou-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
-                alt="ONEVYOU"
-                className="h-9"
-              />
-              <h1 className="text-2xl font-bold tracking-tight bg-gradient-primary bg-clip-text text-transparent">
-                ONEVYOU
-              </h1>
+<header className="bg-card/60 backdrop-blur-xl border-b border-border/50 sticky top-0 z-40 shadow-sm">
+  <div className="container mx-auto px-3 sm:px-6 py-3 sm:py-4">
+    <div className="flex items-center justify-between gap-2">
+      {/* Logo */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <img
+          src="/onevyou-uploads/82f7aa72-94f9-46fe-ab17-75a566659dbd.png"
+          alt="ONEVYOU"
+          className="h-7 sm:h-9"
+        />
+        <h1 className="text-lg sm:text-2xl font-bold tracking-tight bg-gradient-primary bg-clip-text text-transparent">
+          ONEVYOU
+        </h1>
+      </div>
+
+      {/* Right Actions */}
+      <div className="flex items-center gap-2 sm:gap-4">
+        {/* ✅ Desktop: Show toggle inline */}
+        {!isMobile && (
+          <div className="flex items-center gap-3">
+            <div className="relative flex items-center gap-2">
+              <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
+              {isOnline && (
+                <div className="relative w-3 h-3">
+                  <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
+                  <div className="absolute inset-1 bg-green-400 rounded-full"></div>
+                </div>
+              )}
             </div>
+            <Label>{isOnline ? "Online" : "Offline"}</Label>
+          </div>
+        )}
 
-            <div className="flex items-center gap-4">
-            {/* Online toggle with green blink indicator */}
-  <div className="flex items-center gap-3">
-    <div className="relative flex items-center gap-2">
-      <Switch checked={isOnline} onCheckedChange={handleOnlineToggle} />
-      {isOnline && (
-        <div className="relative w-3 h-3">
-          <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
-          <div className="absolute inset-1 bg-green-400 rounded-full"></div>
-        </div>
-      )}
-    </div>
-    <Label>{isOnline ? "Online" : "Offline"}</Label>
-  </div>
+        {/* Notifications */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setShowNotifications(true)}
+          className="relative h-9 w-9 sm:h-10 sm:w-10"
+        >
+          <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
+          {pendingRequests > 0 && (
+            <Badge className="absolute -top-1 -right-1 h-4 w-4 sm:h-5 sm:w-5 bg-destructive text-white rounded-full flex items-center justify-center text-[10px] sm:text-xs">
+              {pendingRequests}
+            </Badge>
+          )}
+        </Button>
 
-              {/* Notifications */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowNotifications(true)}
-                className="relative"
-              >
-                <Bell className="h-5 w-5" />
-                {pendingRequests > 0 && (
-                  <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
-                    {pendingRequests}
-                  </Badge>
+        {/* Profile dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-10 sm:w-10">
+              <Avatar className="h-7 w-7 sm:h-8 sm:w-8">
+                {currentUser?.profileImage ? (
+                  <AvatarImage
+                    src={currentUser.profileImage}
+                    alt={currentUser.fullName}
+                  />
+                ) : (
+                  <AvatarFallback>
+                    {currentUser?.fullName
+                      ? currentUser.fullName.charAt(0).toUpperCase()
+                      : "U"}
+                  </AvatarFallback>
                 )}
-              </Button>
-
-              {/* Profile dropdown */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <Avatar className="h-8 w-8">
-                      {currentUser?.profileImage ? (
-                        <AvatarImage
-                          src={currentUser.profileImage}
-                          alt={currentUser.fullName}
-                        />
-                      ) : (
-                        <AvatarFallback>
-                          {currentUser?.fullName
-                            ? currentUser.fullName.charAt(0).toUpperCase()
-                            : "U"}
-                        </AvatarFallback>
-                      )}
-                    </Avatar>
-                  </Button>
-                </DropdownMenuTrigger>
+              </Avatar>
+            </Button>
+          </DropdownMenuTrigger>
 
                 <DropdownMenuContent align="end" className="w-72">
                   <DropdownMenuLabel>
@@ -850,6 +857,34 @@ const onWalletUpdated = (data: any) => {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+
+                  {/* ✅ Mobile: Show toggle in menu */}
+{isMobile && (
+  <>
+    <div className="px-2 py-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-sm">Status</Label>
+        <div className="flex items-center gap-2">
+          <Switch 
+            checked={isOnline} 
+            onCheckedChange={handleOnlineToggle}
+            className="scale-90"
+          />
+          {isOnline && (
+            <div className="relative w-2.5 h-2.5">
+              <div className="absolute inset-0 bg-green-500 rounded-full animate-pulse"></div>
+              <div className="absolute inset-0.5 bg-green-400 rounded-full"></div>
+            </div>
+          )}
+          <span className="text-sm text-muted-foreground">
+            {isOnline ? "Online" : "Offline"}
+          </span>
+        </div>
+      </div>
+    </div>
+    <DropdownMenuSeparator />
+  </>
+)}
 
                   <DropdownMenuItem onClick={() => setShowEarnings(true)}>
                     <Wallet className="mr-2 h-4 w-4" /> Wallet & Earnings
