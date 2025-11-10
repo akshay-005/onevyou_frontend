@@ -176,6 +176,67 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     };
   }, []);
 
+
+
+  // --- Web Push Subscription Setup ---
+useEffect(() => {
+  if (!currentUser?._id) return; // Wait until user is loaded
+
+  // Convert VAPID public key to Uint8Array
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = "=".repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  };
+
+  const subscribeToPush = async () => {
+    try {
+      // Make sure service worker is ready
+      const registration = await navigator.serviceWorker.ready;
+
+      // Ask for notification permission if not granted
+      if (Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+      if (Notification.permission !== "granted") {
+        console.warn("🔕 Push permission not granted");
+        return;
+      }
+
+      // Subscribe the browser
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(
+          import.meta.env.VITE_VAPID_PUBLIC_KEY
+        ),
+      });
+
+      await (api as any).post("/api/push/save-subscription", {
+  userId: currentUser._id,
+  subscription,
+});
+
+      console.log("✅ Push subscription saved successfully!");
+    } catch (err) {
+      console.error("❌ Push subscription failed:", err);
+    }
+  };
+
+  // Run only once after user is loaded
+  subscribeToPush();
+}, [currentUser]);
+
+
+
+  
+
   // ✅ Load user's saved pricing tiers
   useEffect(() => {
     if (currentUser?.pricingTiers && Array.isArray(currentUser.pricingTiers)) {
