@@ -62,6 +62,7 @@
   import TeacherCard from "@/components/TeacherCard";
   import { clearUserSession } from "@/utils/storage";
   import { disconnectSocket } from "@/utils/socket";
+  import OfflineNotificationDialog from "@/components/OfflineNotificationDialog";
   import {
     Instagram,
     Facebook,
@@ -128,13 +129,16 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     const [selectedTeacher, setSelectedTeacher] = useState<any | null>(null);
     const [showPricingModal, setShowPricingModal] = useState(false);
 
+    const [showOfflineDialog, setShowOfflineDialog] = useState(false);
+    const [selectedOfflineTeacher, setSelectedOfflineTeacher] = useState<any | null>(null);
+
     // Pricing Settings
     const [customDurations, setCustomDurations] = useState([
     { id: 1, minutes: 1, price: 39, isBase: true }
   ]);
     const [newDuration, setNewDuration] = useState({ minutes: "", price: "" });
 
-    // KEY SECTIONS TO REPLACE IN UnifiedDashboard.tsx
+    
 
   // ✅ FIXED: Load current user - only set toggle state once on initial load
   useEffect(() => {
@@ -429,6 +433,38 @@ const onWalletUpdated = (data: any) => {
 };
 
 
+// PURPOSE: Show notification when a user you're waiting for comes online
+
+const onUserNowOnline = (data: any) => {
+  console.log("🎉 User came online:", data);
+  
+  toast({
+    title: "🎉 User is Now Online!",
+    description: `${data.userName} just came online. Connect now!`,
+    duration: 8000,
+    action: (
+      <Button
+        size="sm"
+        onClick={() => {
+          // Find the user and open pricing modal
+          const user = users.find(u => u._id === data.userId);
+          if (user) {
+            openPricingForTeacher(user);
+          }
+        }}
+      >
+        Connect
+      </Button>
+    ),
+  });
+  
+  // Refresh users list to show them as online
+  fetchOnlineUsers();
+};
+
+
+
+
     // Register all listeners
     socket.on("connect", onConnect);
     socket.on("user:status", onUserStatus);
@@ -436,6 +472,8 @@ const onWalletUpdated = (data: any) => {
     socket.on("call:response", onCallResponse);
     socket.on("user:pricing:update", onPricingUpdate);
     socket.on("wallet:updated", onWalletUpdated);
+    socket.on("user:now-online", onUserNowOnline);
+
 
     // If already connected, call onConnect immediately
     if (socket.connected) {
@@ -452,6 +490,8 @@ const onWalletUpdated = (data: any) => {
       socket.off("call:response", onCallResponse);
       socket.off("user:pricing:update", onPricingUpdate);
       socket.off("wallet:updated", onWalletUpdated);
+      socket.off("user:now-online", onUserNowOnline);
+
 
     };
   }, [socket]); // ✅ ONLY depend on socket object itself, not socket.connected

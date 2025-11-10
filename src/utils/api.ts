@@ -93,6 +93,55 @@ export const requestWithdrawal = async (amount: number, method: string) =>
     body: JSON.stringify(data),
   });
 
+
+
+// PURPOSE: API calls for waiting notifications
+
+/**
+ * Request notification when a user comes online
+ */
+const createWaitingNotification = async (targetUserId: string) => {
+  const token = localStorage.getItem("userToken");
+  const res = await fetch(`${API_BASE}/notifications/wait`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ targetUserId }),
+  });
+  return await res.json();
+};
+
+/**
+ * Cancel waiting notification
+ */
+const cancelWaitingNotification = async (targetUserId: string) => {
+  const token = localStorage.getItem("userToken");
+  const res = await fetch(`${API_BASE}/notifications/wait/${targetUserId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return await res.json();
+};
+
+/**
+ * Get my waiting notifications
+ */
+const getMyWaitingNotifications = async () => {
+  const token = localStorage.getItem("userToken");
+  const res = await fetch(`${API_BASE}/notifications/my-waiting`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return await res.json();
+};
+
+
+
 // ===========================
 // DEFAULT EXPORT
 // ===========================
@@ -107,6 +156,9 @@ const api = {
   updateBankDetails,
   requestWithdrawal,
   useWalletForCall,
+  createWaitingNotification,
+  cancelWaitingNotification,
+  getMyWaitingNotifications,
 };
 
 export default api;
