@@ -898,7 +898,7 @@ const onWalletUpdated = (data: any) => {
     </DropdownMenu>
   </div>
 </div>
-
+</header>
             
         
 
