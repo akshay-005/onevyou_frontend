@@ -95,6 +95,7 @@ export const requestWithdrawal = async (amount: number, method: string) =>
 
 
 
+
 // PURPOSE: API calls for waiting notifications
 
 /**
@@ -102,7 +103,7 @@ export const requestWithdrawal = async (amount: number, method: string) =>
  */
 const createWaitingNotification = async (targetUserId: string) => {
   const token = localStorage.getItem("userToken");
-  const res = await fetch(`${API_BASE}/notifications/wait`, {
+  const res = await fetch(`${API_BASE}/api/notifications/wait`, {  // ✅ ADDED /api/
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -118,7 +119,7 @@ const createWaitingNotification = async (targetUserId: string) => {
  */
 const cancelWaitingNotification = async (targetUserId: string) => {
   const token = localStorage.getItem("userToken");
-  const res = await fetch(`${API_BASE}/notifications/wait/${targetUserId}`, {
+  const res = await fetch(`${API_BASE}/api/notifications/wait/${targetUserId}`, {  // ✅ ADDED /api/
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -132,14 +133,13 @@ const cancelWaitingNotification = async (targetUserId: string) => {
  */
 const getMyWaitingNotifications = async () => {
   const token = localStorage.getItem("userToken");
-  const res = await fetch(`${API_BASE}/notifications/my-waiting`, {
+  const res = await fetch(`${API_BASE}/api/notifications/my-waiting`, {  // ✅ ADDED /api/
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
   return await res.json();
 };
-
 
 /**
  * Save web push subscription
