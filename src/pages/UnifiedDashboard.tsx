@@ -131,6 +131,9 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     const [showOfflineDialog, setShowOfflineDialog] = useState(false);
     const [selectedOfflineTeacher, setSelectedOfflineTeacher] = useState<any | null>(null);
+    const [notifiedUsers, setNotifiedUsers] = useState<Set<string>>(new Set());
+
+
 
     // Pricing Settings
     const [customDurations, setCustomDurations] = useState([
@@ -530,12 +533,21 @@ const onWalletUpdated = (data: any) => {
 // PURPOSE: Show notification when a user you're waiting for comes online
 
 const onUserNowOnline = (data: any) => {
-  console.log("🎉 User came online:", data);
+  console.log("🎉 User came online event received:", data);
+  
+  // ✅ Check if we already notified about this user in this session
+  if (notifiedUsers.has(data.userId)) {
+    console.log("⏭️ Already notified about this user, skipping");
+    return;
+  }
+  
+  // ✅ Mark as notified
+  setNotifiedUsers(prev => new Set(prev).add(data.userId));
   
   toast({
     title: "🎉 User is Now Online!",
     description: `${data.userName} just came online. Connect now!`,
-    duration: 10000,
+    duration: 8000,
     action: (
       <Button
         size="sm"
