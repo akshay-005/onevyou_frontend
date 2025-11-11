@@ -60,10 +60,12 @@ const OfflineNotificationDialog: React.FC<OfflineNotificationDialogProps> = ({
         });
         
         // Close after 2 seconds
-        setTimeout(() => {
+       {/* setTimeout(() => {
           onClose();
           setNotificationSet(false);
-        }, 2000);
+        }, 2000);  */} 
+
+
       } else if (res.alreadyOnline) {
         toast({
           title: "User is Online!",

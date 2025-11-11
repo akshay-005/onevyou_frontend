@@ -182,6 +182,30 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 useEffect(() => {
   if (!currentUser?._id) return;
 
+  // ✅ ADD THIS: Request permission immediately when user logs in
+  const requestPushPermission = async () => {
+    if (!('Notification' in window)) {
+      console.log("⚠️ Notifications not supported");
+      return;
+    }
+
+     // Show permission dialog
+    if (Notification.permission === "default") {
+      const permission = await Notification.requestPermission();
+      console.log("🔔 Notification permission:", permission);
+      
+      if (permission === "granted") {
+        toast({
+          title: "🔔 Notifications Enabled",
+          description: "You'll get alerts when users come online",
+        });
+      }
+    }
+  };
+
+   // Request permission first
+  requestPushPermission();
+
   const urlBase64ToUint8Array = (base64String: string) => {
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)
@@ -511,7 +535,7 @@ const onUserNowOnline = (data: any) => {
   toast({
     title: "🎉 User is Now Online!",
     description: `${data.userName} just came online. Connect now!`,
-    duration: 8000,
+    duration: 10000,
     action: (
       <Button
         size="sm"
