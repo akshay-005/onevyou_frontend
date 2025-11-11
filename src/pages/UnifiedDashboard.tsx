@@ -180,11 +180,10 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
   // --- Web Push Subscription Setup ---
 useEffect(() => {
-  if (!currentUser?._id) return; // Wait until user is loaded
+  if (!currentUser?._id) return;
 
-  // Convert VAPID public key to Uint8Array
   const urlBase64ToUint8Array = (base64String: string) => {
-    const padding = "=".repeat((4 - base64String.length % 4) % 4);
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)
       .replace(/-/g, "+")
       .replace(/_/g, "/");
@@ -198,38 +197,48 @@ useEffect(() => {
 
   const subscribeToPush = async () => {
     try {
-      // Make sure service worker is ready
+      // Check if service worker and push are supported
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log("⚠️ Push notifications not supported in this browser");
+        return;
+      }
+
+      // ✅ FIXED: Check if VAPID key exists
+      const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!vapidKey) {
+        console.warn("⚠️ VAPID public key not configured");
+        return;
+      }
+
       const registration = await navigator.serviceWorker.ready;
 
-      // Ask for notification permission if not granted
       if (Notification.permission === "default") {
         await Notification.requestPermission();
       }
+      
       if (Notification.permission !== "granted") {
         console.warn("🔕 Push permission not granted");
         return;
       }
 
-      // Subscribe the browser
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(
-          import.meta.env.VITE_VAPID_PUBLIC_KEY
-        ),
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
       });
 
-      await (api as any).post("/api/push/save-subscription", {
-  userId: currentUser._id,
-  subscription,
-});
-
-      console.log("✅ Push subscription saved successfully!");
+      // ✅ FIXED: Use proper API call
+      const res = await api.savePushSubscription(currentUser._id, subscription);
+      
+      if (res.success) {
+        console.log("✅ Push subscription saved successfully!");
+      } else {
+        console.error("❌ Failed to save push subscription:", res);
+      }
     } catch (err) {
       console.error("❌ Push subscription failed:", err);
     }
   };
 
-  // Run only once after user is loaded
   subscribeToPush();
 }, [currentUser]);
 
@@ -695,76 +704,89 @@ const onUserNowOnline = (data: any) => {
   //  open Pricing For Teacher function 
 
   const openPricingForTeacher = async (teacher: any) => {
-    try {
-      console.log("🔍 Opening pricing modal for:", teacher.fullName || teacher.name);
-      console.log("📊 Current teacher data:", {
-        id: teacher._id,
-        tiers: teacher.pricingTiers,
-        rate: teacher.ratePerMinute
-      });
-
-      // ✅ Fetch FRESH data from backend to get latest pricing
-      const freshRes = await api.getOnlineUsers();
-      
-      let freshTeacher = teacher;
-      
-      if (freshRes?.success && Array.isArray(freshRes.users)) {
-        const found = freshRes.users.find((u: any) => 
-          u._id === teacher._id || u._id === teacher.id
-        );
-        
-        if (found) {
-          freshTeacher = found;
-          console.log("✅ Fetched fresh teacher data:", {
-            name: found.fullName,
-            tiers: found.pricingTiers,
-            rate: found.ratePerMinute
-          });
-        }
-      }
-
-      // ✅ Ensure pricingTiers is always an array
-      const pricingTiers = Array.isArray(freshTeacher?.pricingTiers) && freshTeacher.pricingTiers.length > 0
-        ? freshTeacher.pricingTiers
-        : [{ minutes: 1, price: freshTeacher?.ratePerMinute || 39 }];
-
-      console.log("💰 Final pricing tiers to display:", pricingTiers);
-
-      const safeTeacher = {
-        id: freshTeacher._id || freshTeacher.id,
-        _id: freshTeacher._id || freshTeacher.id,
-        name: freshTeacher.fullName || freshTeacher.name || "User",
-        rating: freshTeacher.rating || freshTeacher.profile?.rating || 4.8,
-        expertise: freshTeacher.skills?.[0] || freshTeacher.expertise || "Expert",
-        pricingTiers: pricingTiers.sort((a, b) => a.minutes - b.minutes),
-        ratePerMinute: freshTeacher.ratePerMinute || pricingTiers[0]?.price || 39
-      };
-
-      console.log("🎯 Opening modal with teacher:", safeTeacher);
-      
-      setSelectedTeacher(safeTeacher);
-      setShowPricingModal(true);
-    } catch (err) {
-      console.error("❌ Error fetching latest teacher data:", err);
-      
-      // Fallback to existing data
-      const fallbackTiers = Array.isArray(teacher?.pricingTiers) && teacher.pricingTiers.length > 0
-        ? teacher.pricingTiers
-        : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }];
-      
-      setSelectedTeacher({
+  try {
+    console.log("🔍 Opening pricing modal for:", teacher.fullName || teacher.name);
+    
+    // ✅ NEW: Check if user is offline
+    if (!teacher.online && teacher.online !== undefined) {
+      console.log("⚠️ User is offline, showing notification dialog");
+      setSelectedOfflineTeacher({
         id: teacher._id || teacher.id,
         _id: teacher._id || teacher.id,
         name: teacher.fullName || teacher.name || "User",
-        rating: teacher.rating || 4.8,
-        expertise: teacher.skills?.[0] || "Expert",
-        pricingTiers: fallbackTiers,
-        ratePerMinute: teacher.ratePerMinute || 39
+        fullName: teacher.fullName || teacher.name || "User",
+        profileImage: teacher.profileImage,
+        expertise: teacher.skills?.[0] || teacher.expertise || "Expert",
       });
-      setShowPricingModal(true);
+      setShowOfflineDialog(true);
+      return; // ✅ Exit early - don't show pricing modal
     }
-  };
 
+    // ✅ REST OF EXISTING CODE FOR ONLINE USERS
+    console.log("📊 Current teacher data:", {
+      id: teacher._id,
+      tiers: teacher.pricingTiers,
+      rate: teacher.ratePerMinute
+    });
+
+    const freshRes = await api.getOnlineUsers();
+    
+    let freshTeacher = teacher;
+    
+    if (freshRes?.success && Array.isArray(freshRes.users)) {
+      const found = freshRes.users.find((u: any) => 
+        u._id === teacher._id || u._id === teacher.id
+      );
+      
+      if (found) {
+        freshTeacher = found;
+        console.log("✅ Fetched fresh teacher data:", {
+          name: found.fullName,
+          tiers: found.pricingTiers,
+          rate: found.ratePerMinute
+        });
+      }
+    }
+
+    const pricingTiers = Array.isArray(freshTeacher?.pricingTiers) && freshTeacher.pricingTiers.length > 0
+      ? freshTeacher.pricingTiers
+      : [{ minutes: 1, price: freshTeacher?.ratePerMinute || 39 }];
+
+    console.log("💰 Final pricing tiers to display:", pricingTiers);
+
+    const safeTeacher = {
+      id: freshTeacher._id || freshTeacher.id,
+      _id: freshTeacher._id || freshTeacher.id,
+      name: freshTeacher.fullName || freshTeacher.name || "User",
+      rating: freshTeacher.rating || freshTeacher.profile?.rating || 4.8,
+      expertise: freshTeacher.skills?.[0] || freshTeacher.expertise || "Expert",
+      pricingTiers: pricingTiers.sort((a, b) => a.minutes - b.minutes),
+      ratePerMinute: freshTeacher.ratePerMinute || pricingTiers[0]?.price || 39
+    };
+
+    console.log("🎯 Opening modal with teacher:", safeTeacher);
+    
+    setSelectedTeacher(safeTeacher);
+    setShowPricingModal(true);
+  } catch (err) {
+    console.error("❌ Error fetching latest teacher data:", err);
+    
+    const fallbackTiers = Array.isArray(teacher?.pricingTiers) && teacher.pricingTiers.length > 0
+      ? teacher.pricingTiers
+      : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }];
+    
+    setSelectedTeacher({
+      id: teacher._id || teacher.id,
+      _id: teacher._id || teacher.id,
+      name: teacher.fullName || teacher.name || "User",
+      rating: teacher.rating || 4.8,
+      expertise: teacher.skills?.[0] || "Expert",
+      pricingTiers: fallbackTiers,
+      ratePerMinute: teacher.ratePerMinute || 39
+    });
+    setShowPricingModal(true);
+  }
+};
 
   const handleConnect = (userId: string, rate: number, userObj?: any) => {
     const teacherLike =
@@ -1597,8 +1619,21 @@ const onUserNowOnline = (data: any) => {
             <CallHistory />
           </DialogContent>
         </Dialog>
+
+        {/* ✅ ADD THIS - Offline Notification Dialog */}
+{selectedOfflineTeacher && (
+  <OfflineNotificationDialog
+    isOpen={showOfflineDialog}
+    onClose={() => {
+      setShowOfflineDialog(false);
+      setSelectedOfflineTeacher(null);
+    }}
+    teacher={selectedOfflineTeacher}
+  />
+)}
       </div>
     );
   };
 
+  
   export default UnifiedDashboard;

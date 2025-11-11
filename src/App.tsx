@@ -1,4 +1,16 @@
 // src/App.tsx
+
+// Register service worker for push notifications
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker
+    .register('/sw.js')
+    .then((registration) => {
+      console.log('✅ Service Worker registered:', registration);
+    })
+    .catch((error) => {
+      console.error('❌ Service Worker registration failed:', error);
+    });
+}
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -24,6 +36,8 @@ import ForgotPassword from "@/pages/ForgotPassword";
 import AuthSuccess from "./pages/AuthSuccess";
 
 const queryClient = new QueryClient();
+
+
 
 const App = () => {
   return (

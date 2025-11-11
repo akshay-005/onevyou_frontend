@@ -141,6 +141,16 @@ const getMyWaitingNotifications = async () => {
 };
 
 
+/**
+ * Save web push subscription
+ */
+const savePushSubscription = async (userId: string, subscription: any) =>
+  fetchJSON(`${API_BASE}/api/push/save-subscription`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ userId, subscription }),
+  });
+
 
 // ===========================
 // DEFAULT EXPORT
@@ -159,6 +169,7 @@ const api = {
   createWaitingNotification,
   cancelWaitingNotification,
   getMyWaitingNotifications,
+  savePushSubscription,
 };
 
 export default api;
