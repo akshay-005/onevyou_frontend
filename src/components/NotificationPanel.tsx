@@ -50,6 +50,25 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   const socket = useSocket();
   const [isSocketReady, setIsSocketReady] = useState(false);
   const [activeTab, setActiveTab] = useState("incoming");
+
+  const handleDismissNotification = async (notification: any) => {
+  try {
+    // Just remove from local state (don't notify the waiting user)
+    setWaitingNotifications(prev => 
+      prev.filter(n => n._id !== notification._id)
+    );
+    
+    // Optionally: Mark as expired in backend
+    await api.cancelWaitingNotification(notification.waitingUserId._id);
+    
+    toast({
+      title: "Notification Dismissed",
+      description: "User will not be notified",
+    });
+  } catch (err) {
+    console.error("Error dismissing notification:", err);
+  }
+};
   
   const requests = externalRequests || localRequests;
   
@@ -375,9 +394,20 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
               <div className="space-y-3">
                 {waitingNotifications.map((notification) => (
                   <Card
+                  
                     key={notification._id}
                     className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800"
+            
                   >
+                    <Button
+              size="icon"
+              variant="ghost"
+              className="absolute top-2 right-2 h-6 w-6 hover:bg-destructive/10"
+              onClick={() => handleDismissNotification(notification)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
