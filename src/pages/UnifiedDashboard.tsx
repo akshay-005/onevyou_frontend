@@ -133,6 +133,8 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     const [selectedOfflineTeacher, setSelectedOfflineTeacher] = useState<any | null>(null);
     const [notifiedUsers, setNotifiedUsers] = useState<Set<string>>(new Set());
 
+    const [missedNotificationCount, setMissedNotificationCount] = useState(0);
+
 
 
     // Pricing Settings
@@ -317,6 +319,42 @@ useEffect(() => {
     window.addEventListener('call-request-handled', handleRequestHandled);
     return () => window.removeEventListener('call-request-handled', handleRequestHandled);
   }, []);
+
+
+  // ✅ Fetch missed notifications count
+useEffect(() => {
+  const fetchMissedCount = async () => {
+    try {
+      const res = await api.getMyWaitingNotifications();
+      if (res.success && res.notifications) {
+        setMissedNotificationCount(res.notifications.length);
+      }
+    } catch (err) {
+      console.error("Error fetching missed count:", err);
+    }
+  };
+
+  fetchMissedCount();
+  
+  // Refresh every 30 seconds
+  const interval = setInterval(fetchMissedCount, 30000);
+  return () => clearInterval(interval);
+}, []);
+
+// ✅ Listen for dismissed notifications
+useEffect(() => {
+  const handleNotificationDismissed = () => {
+    // Refresh missed count
+    api.getMyWaitingNotifications().then((res) => {
+      if (res.success && res.notifications) {
+        setMissedNotificationCount(res.notifications.length);
+      }
+    });
+  };
+
+  window.addEventListener('notification-dismissed', handleNotificationDismissed);
+  return () => window.removeEventListener('notification-dismissed', handleNotificationDismissed);
+}, []);
 
   // Fetch online users
   const fetchOnlineUsers = async () => {
@@ -968,18 +1006,19 @@ const onUserNowOnline = (data: any) => {
 
     {/* Notifications */}
     <Button
-      variant="ghost"
-      size="icon"
-      onClick={() => setShowNotifications(true)}
-      className="relative"
-    >
-      <Bell className="h-5 w-5" />
-      {pendingRequests > 0 && (
-        <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
-          {pendingRequests}
-        </Badge>
-      )}
-    </Button>
+  variant="ghost"
+  size="icon"
+  onClick={() => setShowNotifications(true)}
+  className="relative"
+>
+  <Bell className="h-5 w-5" />
+  {/* ✅ Show total of incoming + missed */}
+  {(pendingRequests + missedNotificationCount) > 0 && (
+    <Badge className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
+      {pendingRequests + missedNotificationCount}
+    </Badge>
+  )}
+</Button>
 
     {/* Profile dropdown (kept visible) */}
     <DropdownMenu>

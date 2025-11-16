@@ -51,22 +51,44 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   const [isSocketReady, setIsSocketReady] = useState(false);
   const [activeTab, setActiveTab] = useState("incoming");
 
-  const handleDismissNotification = async (notification: any) => {
+ const handleDismissNotification = async (notification: any) => {
   try {
-    // Just remove from local state (don't notify the waiting user)
+    console.log("🗑️ Dismissing notification:", notification._id);
+    
+    // ✅ Remove from local state immediately (optimistic update)
     setWaitingNotifications(prev => 
       prev.filter(n => n._id !== notification._id)
     );
     
-    // Optionally: Mark as expired in backend
-    await api.cancelWaitingNotification(notification.waitingUserId._id);
+    // ✅ Delete permanently from backend
+    const res = await api.dismissWaitingNotification(notification._id);
     
-    toast({
-      title: "Notification Dismissed",
-      description: "User will not be notified",
-    });
+    if (res.success) {
+      toast({
+        title: "Notification Dismissed",
+        description: "Removed from your list",
+      });
+
+       // ✅ Notify dashboard to update count
+    window.dispatchEvent(new Event('notification-dismissed'));
+    } else {
+      // If failed, add back to list
+      setWaitingNotifications(prev => [...prev, notification]);
+      toast({
+        title: "Error",
+        description: "Failed to dismiss notification",
+        variant: "destructive",
+      });
+    }
   } catch (err) {
     console.error("Error dismissing notification:", err);
+    // Rollback on error
+    setWaitingNotifications(prev => [...prev, notification]);
+    toast({
+      title: "Error",
+      description: "Failed to dismiss notification",
+      variant: "destructive",
+    });
   }
 };
   
@@ -407,7 +429,7 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
             >
               <X className="h-4 w-4" />
             </Button>
-            
+
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">

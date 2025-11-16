@@ -152,6 +152,22 @@ const savePushSubscription = async (userId: string, subscription: any) =>
   });
 
 
+  /**
+ * Dismiss a waiting notification (delete it)
+ */
+const dismissWaitingNotification = async (notificationId: string) => {
+  const token = localStorage.getItem("userToken");
+  const res = await fetch(`${API_BASE}/api/notifications/dismiss/${notificationId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return await res.json();
+};
+
+
+
 // ===========================
 // DEFAULT EXPORT
 // ===========================
@@ -170,6 +186,7 @@ const api = {
   cancelWaitingNotification,
   getMyWaitingNotifications,
   savePushSubscription,
+  dismissWaitingNotification,
 };
 
 export default api;
