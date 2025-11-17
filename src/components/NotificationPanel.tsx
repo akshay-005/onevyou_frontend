@@ -27,6 +27,21 @@ function stopAllRingtones() {
   });
 }
 
+// ✅ Helper: Format time ago
+function formatTimeAgo(date: string | Date): string {
+  const now = new Date();
+  const then = new Date(date);
+  const diffMs = now.getTime() - then.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+}
+
 interface ConnectionRequest {
   id: string;
   studentName: string;
@@ -51,28 +66,38 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   const [isSocketReady, setIsSocketReady] = useState(false);
   const [activeTab, setActiveTab] = useState("incoming");
 
- const handleDismissNotification = async (notification: any) => {
-  try {
-    console.log("🗑️ Dismissing notification:", notification._id);
-    
-    // ✅ Remove from local state immediately (optimistic update)
-    setWaitingNotifications(prev => 
-      prev.filter(n => n._id !== notification._id)
-    );
-    
-    // ✅ Delete permanently from backend
-    const res = await api.dismissWaitingNotification(notification._id);
-    
-    if (res.success) {
-      toast({
-        title: "Notification Dismissed",
-        description: "Removed from your list",
-      });
+  const handleDismissNotification = async (notification: any) => {
+    try {
+      console.log("🗑️ Dismissing notification:", notification._id);
+      
+      // ✅ Remove from local state immediately (optimistic update)
+      setWaitingNotifications(prev => 
+        prev.filter(n => n._id !== notification._id)
+      );
+      
+      // ✅ Delete permanently from backend
+      const res = await api.dismissWaitingNotification(notification._id);
+      
+      if (res.success) {
+        toast({
+          title: "Notification Dismissed",
+          description: "Removed from your list",
+        });
 
-       // ✅ Notify dashboard to update count
-    window.dispatchEvent(new Event('notification-dismissed'));
-    } else {
-      // If failed, add back to list
+        // ✅ Notify dashboard to update count
+        window.dispatchEvent(new Event('notification-dismissed'));
+      } else {
+        // If failed, add back to list
+        setWaitingNotifications(prev => [...prev, notification]);
+        toast({
+          title: "Error",
+          description: "Failed to dismiss notification",
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      console.error("Error dismissing notification:", err);
+      // Rollback on error
       setWaitingNotifications(prev => [...prev, notification]);
       toast({
         title: "Error",
@@ -80,17 +105,7 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
         variant: "destructive",
       });
     }
-  } catch (err) {
-    console.error("Error dismissing notification:", err);
-    // Rollback on error
-    setWaitingNotifications(prev => [...prev, notification]);
-    toast({
-      title: "Error",
-      description: "Failed to dismiss notification",
-      variant: "destructive",
-    });
-  }
-};
+  };
   
   const requests = externalRequests || localRequests;
   
@@ -192,12 +207,31 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
       });
     });
 
+    // ✅ NEW: Listen for "someone wants to connect" toast notification
+    socket.on("user:wants-to-connect", (data) => {
+      console.log("🔔 Someone wants to connect:", data);
+      
+      toast({
+        title: "📞 Connection Request",
+        description: `${data.userName} wants to connect with you when you're online`,
+        duration: 5000,
+      });
+      
+      // Refresh waiting list
+      api.getMyWaitingNotifications().then((res) => {
+        if (res.success && res.notifications) {
+          setWaitingNotifications(res.notifications);
+        }
+      });
+    });
+
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("call:incoming");
       socket.off("call:cancelled");
       socket.off("call:timeout");
+      socket.off("user:wants-to-connect");
     };
   }, [socket, toast]);
 
@@ -260,26 +294,46 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
     setLocalRequests((r) => r.filter((req) => req.id !== requestId));
   };
 
+  // ✅ FIXED: Now sends proper notification
   const handleNotifyWaiting = async (notification: any) => {
     try {
-      // Send notification that I'm now available
-      if (socket && socket.connected) {
-        socket.emit("user:now-available", {
-          targetUserId: notification.waitingUserId._id,
-        });
-        
+      console.log("🔔 Notifying user:", notification.waitingUserId._id);
+      
+      if (!socket || !socket.connected) {
         toast({
-          title: "Notification Sent!",
-          description: `${notification.waitingUserId.fullName} has been notified you're online`,
+          title: "Connection Error",
+          description: "Please check your internet connection",
+          variant: "destructive",
         });
-
-        // Remove from list
-        setWaitingNotifications(prev => 
-          prev.filter(n => n._id !== notification._id)
-        );
+        return;
       }
+
+      // ✅ Emit socket event to notify the waiting user
+      socket.emit("user:notify-available", {
+        targetUserId: notification.waitingUserId._id,
+        notificationId: notification._id,
+      });
+
+      toast({
+        title: "Notification Sent! ✅",
+        description: `${notification.waitingUserId.fullName} has been notified you're online`,
+      });
+
+      // ✅ Remove from local state (will be deleted on backend)
+      setWaitingNotifications(prev => 
+        prev.filter(n => n._id !== notification._id)
+      );
+
+      // Update dashboard count
+      window.dispatchEvent(new Event('notification-dismissed'));
+
     } catch (err) {
       console.error("Error notifying user:", err);
+      toast({
+        title: "Error",
+        description: "Failed to send notification",
+        variant: "destructive",
+      });
     }
   };
 
@@ -416,21 +470,19 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
               <div className="space-y-3">
                 {waitingNotifications.map((notification) => (
                   <Card
-                  
                     key={notification._id}
-                    className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800"
-            
+                    className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800 relative"
                   >
                     <Button
-              size="icon"
-              variant="ghost"
-              className="absolute top-2 right-2 h-6 w-6 hover:bg-destructive/10"
-              onClick={() => handleDismissNotification(notification)}
-            >
-              <X className="h-4 w-4" />
-            </Button>
+                      size="icon"
+                      variant="ghost"
+                      className="absolute top-2 right-2 h-6 w-6 hover:bg-destructive/10"
+                      onClick={() => handleDismissNotification(notification)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
 
-                    <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-start justify-between mb-3 pr-8">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
                           {notification.waitingUserId?.profileImage ? (
@@ -445,8 +497,9 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
                           <p className="font-semibold">
                             {notification.waitingUserId?.fullName || "Unknown User"}
                           </p>
-                          <p className="text-xs text-muted-foreground">
-                            Wants to connect with you
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatTimeAgo(notification.createdAt)}
                           </p>
                         </div>
                       </div>
