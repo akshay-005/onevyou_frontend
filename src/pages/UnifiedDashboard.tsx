@@ -572,16 +572,19 @@ const onWalletUpdated = (data: any) => {
 
 const onUserNowOnline = (data: any) => {
   console.log("🎉 User came online event received:", data);
-  
-  // ✅ Check if we already notified about this user in this session
+
+  // ✅ Avoid duplicate toasts for same user in this session
   if (notifiedUsers.has(data.userId)) {
     console.log("⏭️ Already notified about this user, skipping");
     return;
   }
-  
-  // ✅ Mark as notified
-  setNotifiedUsers(prev => new Set(prev).add(data.userId));
-  
+
+  setNotifiedUsers((prev) => {
+    const next = new Set(prev);
+    next.add(data.userId);
+    return next;
+  });
+
   toast({
     title: "🎉 User is Now Online!",
     description: `${data.userName} just came online. Connect now!`,
@@ -590,24 +593,28 @@ const onUserNowOnline = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
-          // Find the user and open pricing modal
-          const user = users.find(u => u._id === data.userId);
-          if (user) {
-             console.log("🔍 Opening pricing from toast for:", user.fullName);
-            openPricingForTeacher(user);
-            } else {
-            console.warn("⚠️ User not found in list for toast connect:", data.userId);
-          
-           // openPricingForTeacher(user);
-          }
+          // ✅ Build a minimal teacher object and let openPricingForTeacher fetch full data
+          const teacherLike = {
+            _id: data.userId,
+            id: data.userId,
+            fullName: data.userName,
+            name: data.userName,
+            online: true,
+          };
+
+          console.log(
+            "🔍 Opening pricing from toast (now-online) for:",
+            teacherLike.fullName
+          );
+          openPricingForTeacher(teacherLike);
         }}
       >
         Connect
       </Button>
     ),
   });
-  
-  // Refresh users list to show them as online
+
+  // Just refresh list in background
   fetchOnlineUsers();
 };
 
@@ -626,7 +633,7 @@ const onUserNowOnline = (data: any) => {
     // ✅ NEW: Listen for manual "I'm available" notification
 const onUserNowAvailable = (data: any) => {
   console.log("📞 User is now available (manual notify):", data);
-  
+
   toast({
     title: "📞 User is Now Available!",
     description: `${data.userName} is online and ready to connect!`,
@@ -635,52 +642,30 @@ const onUserNowAvailable = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
+          // ✅ Same idea: minimal teacher, let modal logic fetch full details
+          const teacherLike = {
+            _id: data.userId,
+            id: data.userId,
+            fullName: data.userName,
+            name: data.userName,
+            online: true,
+          };
 
-         {/* const user = users.find(u => u._id === data.userId);
-          if (user) {
-            openPricingForTeacher(user);
-          } else {
-            fetchOnlineUsers().then(() => {
-              const freshUser = users.find(u => u._id === data.userId);
-              if (freshUser) openPricingForTeacher(freshUser);
-            });
-          }
-        }}   */}
-            // ✅ Try to find user in current list
-          let user = users.find((u: any) => u._id === data.userId);
-
-          if (user) {
-            console.log("🔍 Opening pricing (now-available) for:", user.fullName);
-            openPricingForTeacher(user);
-            return;
-          }
-
-          // ✅ Fallback: refresh online users and try again
-          console.log("🔄 User not in current list, refetching online users...");
-          fetchOnlineUsers().then(async () => {
-            // Small delay to ensure state update
-            setTimeout(() => {
-              user = users.find((u: any) => u._id === data.userId);
-              if (user) {
-                openPricingForTeacher(user);
-              } else {
-                toast({
-                  title: "User not found",
-                  description: "Please refresh and try again.",
-                  variant: "destructive",
-                });
-              }
-            }, 300);
-          });
+          console.log(
+            "🔍 Opening pricing from toast (now-available) for:",
+            teacherLike.fullName
+          );
+          openPricingForTeacher(teacherLike);
         }}
       >
         Connect Now
       </Button>
     ),
   });
-  
+
   fetchOnlineUsers();
 };
+
 
 // Register the listener
 socket.on("user:now-available", onUserNowAvailable);
