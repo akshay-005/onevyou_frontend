@@ -593,7 +593,12 @@ const onUserNowOnline = (data: any) => {
           // Find the user and open pricing modal
           const user = users.find(u => u._id === data.userId);
           if (user) {
+             console.log("🔍 Opening pricing from toast for:", user.fullName);
             openPricingForTeacher(user);
+            } else {
+            console.warn("⚠️ User not found in list for toast connect:", data.userId);
+          
+           // openPricingForTeacher(user);
           }
         }}
       >
@@ -630,7 +635,8 @@ const onUserNowAvailable = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
-          const user = users.find(u => u._id === data.userId);
+
+         {/* const user = users.find(u => u._id === data.userId);
           if (user) {
             openPricingForTeacher(user);
           } else {
@@ -639,6 +645,33 @@ const onUserNowAvailable = (data: any) => {
               if (freshUser) openPricingForTeacher(freshUser);
             });
           }
+        }}   */}
+            // ✅ Try to find user in current list
+          let user = users.find((u: any) => u._id === data.userId);
+
+          if (user) {
+            console.log("🔍 Opening pricing (now-available) for:", user.fullName);
+            openPricingForTeacher(user);
+            return;
+          }
+
+          // ✅ Fallback: refresh online users and try again
+          console.log("🔄 User not in current list, refetching online users...");
+          fetchOnlineUsers().then(async () => {
+            // Small delay to ensure state update
+            setTimeout(() => {
+              user = users.find((u: any) => u._id === data.userId);
+              if (user) {
+                openPricingForTeacher(user);
+              } else {
+                toast({
+                  title: "User not found",
+                  description: "Please refresh and try again.",
+                  variant: "destructive",
+                });
+              }
+            }, 300);
+          });
         }}
       >
         Connect Now
