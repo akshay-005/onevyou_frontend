@@ -187,18 +187,17 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 useEffect(() => {
   if (!currentUser?._id) return;
 
-  // ✅ ADD THIS: Request permission immediately when user logs in
+  // ✅ Ask for permission once when user logs in
   const requestPushPermission = async () => {
-    if (!('Notification' in window)) {
+    if (!("Notification" in window)) {
       console.log("⚠️ Notifications not supported");
       return;
     }
 
-     // Show permission dialog
     if (Notification.permission === "default") {
       const permission = await Notification.requestPermission();
       console.log("🔔 Notification permission:", permission);
-      
+
       if (permission === "granted") {
         toast({
           title: "🔔 Notifications Enabled",
@@ -208,77 +207,98 @@ useEffect(() => {
     }
   };
 
-   // Request permission first
   requestPushPermission();
 
-  function urlBase64ToUint8Array(base64String: string) {
-  // ✅ Fix padding (length must be multiple of 4)
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  // ✅ SAFE: Convert base64 URL key to Uint8Array with padding
+  const urlBase64ToUint8Array = (base64String: string) => {
+    base64String = base64String.trim();
 
-  // ✅ Replace URL-safe characters
-  const base64 = (base64String + padding)
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding)
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
 
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-
-  return outputArray;
-}
-
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  };
 
   const subscribeToPush = async () => {
     try {
-      // Check if service worker and push are supported
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
         console.log("⚠️ Push notifications not supported in this browser");
         return;
       }
 
-      // ✅ FIXED: Check if VAPID key exists
       const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      console.log("🔑 VAPID key from env:", vapidKey, "length:", vapidKey?.length);
+
       if (!vapidKey) {
         console.warn("⚠️ VAPID public key not configured");
         return;
       }
 
       const registration = await navigator.serviceWorker.ready;
+      console.log("👷 SW ready:", registration);
 
+      // Permissions
       if (Notification.permission === "default") {
-        await Notification.requestPermission();
-      }
-      
-      if (Notification.permission !== "granted") {
-        console.warn("🔕 Push permission not granted");
+        const permission = await Notification.requestPermission();
+        console.log("🔔 Notification permission:", permission);
+        if (permission !== "granted") {
+          console.warn("🔕 Push permission not granted");
+          return;
+        }
+      } else if (Notification.permission === "denied") {
+        console.warn("🔕 Notifications denied by user");
         return;
       }
-      console.log("🔑 VAPID key from env:", vapidKey, "length:", vapidKey?.length);
 
+      // ✅ Check existing subscription first
+      let existing = await registration.pushManager.getSubscription();
+      console.log("📬 Existing subscription:", existing);
+
+      if (existing) {
+        console.log("♻️ Reusing existing push subscription");
+        const res = await api.savePushSubscription(currentUser._id, existing);
+        if (res.success) {
+          console.log("✅ Existing push subscription saved successfully!");
+        } else {
+          console.error("❌ Failed to save existing subscription:", res);
+        }
+        return;
+      }
+
+      // ✅ Create new subscription if none exists
+      const appServerKey = urlBase64ToUint8Array(vapidKey);
+      console.log("📐 applicationServerKey Uint8Array length:", appServerKey.length);
 
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        applicationServerKey: appServerKey,
       });
 
-      // ✅ FIXED: Use proper API call
+      console.log("✅ New push subscription created:", subscription);
+
       const res = await api.savePushSubscription(currentUser._id, subscription);
-      
+
       if (res.success) {
         console.log("✅ Push subscription saved successfully!");
       } else {
         console.error("❌ Failed to save push subscription:", res);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Push subscription failed:", err);
+      console.log("❌ Error name:", err?.name, "message:", err?.message);
     }
   };
 
   subscribeToPush();
 }, [currentUser]);
+
 
 
 
