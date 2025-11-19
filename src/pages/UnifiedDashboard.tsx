@@ -249,6 +249,8 @@ useEffect(() => {
         console.warn("🔕 Push permission not granted");
         return;
       }
+      console.log("🔑 VAPID key from env:", vapidKey, "length:", vapidKey?.length);
+
 
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
