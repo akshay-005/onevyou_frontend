@@ -618,6 +618,40 @@ const onUserNowOnline = (data: any) => {
     socket.on("wallet:updated", onWalletUpdated);
     socket.on("user:now-online", onUserNowOnline);
 
+    // ✅ NEW: Listen for manual "I'm available" notification
+const onUserNowAvailable = (data: any) => {
+  console.log("📞 User is now available (manual notify):", data);
+  
+  toast({
+    title: "📞 User is Now Available!",
+    description: `${data.userName} is online and ready to connect!`,
+    duration: 8000,
+    action: (
+      <Button
+        size="sm"
+        onClick={() => {
+          const user = users.find(u => u._id === data.userId);
+          if (user) {
+            openPricingForTeacher(user);
+          } else {
+            fetchOnlineUsers().then(() => {
+              const freshUser = users.find(u => u._id === data.userId);
+              if (freshUser) openPricingForTeacher(freshUser);
+            });
+          }
+        }}
+      >
+        Connect Now
+      </Button>
+    ),
+  });
+  
+  fetchOnlineUsers();
+};
+
+// Register the listener
+socket.on("user:now-available", onUserNowAvailable);
+
 
     // If already connected, call onConnect immediately
     if (socket.connected) {
@@ -635,6 +669,7 @@ const onUserNowOnline = (data: any) => {
       socket.off("user:pricing:update", onPricingUpdate);
       socket.off("wallet:updated", onWalletUpdated);
       socket.off("user:now-online", onUserNowOnline);
+      socket.off("user:now-available", onUserNowAvailable);
 
 
     };
