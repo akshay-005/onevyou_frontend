@@ -23,6 +23,7 @@ import "./utils/debugHelper";
 import AdminDashboard from "./pages/AdminDashboard";
 import ForgotPassword from "@/pages/ForgotPassword";
 import AuthSuccess from "./pages/AuthSuccess";
+import ProfilePublic from "@/pages/ProfilePublic";
 
 const queryClient = new QueryClient();
 
@@ -51,6 +52,7 @@ const App = () => {
               <Route path="/backoffice" element={<AdminDashboard />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/auth-success" element={<AuthSuccess />} />
+              <Route path="/profile/:id" element={<ProfilePublic />} />
 
 
               <Route
