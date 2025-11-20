@@ -263,7 +263,9 @@ useEffect(() => {
 
       if (existing) {
         console.log("♻️ Reusing existing push subscription");
-        const res = await api.savePushSubscription(currentUser._id, existing);
+        const payload = existing.toJSON ? existing.toJSON() : JSON.parse(JSON.stringify(existing));
+        const res = await api.savePushSubscription(currentUser._id, payload);
+
         if (res.success) {
           console.log("✅ Existing push subscription saved successfully!");
         } else {
@@ -283,7 +285,9 @@ useEffect(() => {
 
       console.log("✅ New push subscription created:", subscription);
 
-      const res = await api.savePushSubscription(currentUser._id, subscription);
+      const payload = subscription.toJSON ? subscription.toJSON() : JSON.parse(JSON.stringify(subscription));
+      const res = await api.savePushSubscription(currentUser._id, payload);
+
 
       if (res.success) {
         console.log("✅ Push subscription saved successfully!");
