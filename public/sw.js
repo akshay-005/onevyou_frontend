@@ -1,27 +1,47 @@
 // frontend/public/sw.js
 // Service Worker for handling web push notifications
 
-self.addEventListener('push', function(event) {
-  console.log('📬 Push notification received:', event);
-  
-  const data = event.data ? event.data.json() : {};
-  
-  const options = {
-    body: data.body || 'You have a new notification',
-    icon: data.icon || '/icon.png',
-    badge: '/badge.png',
-    vibrate: [200, 100, 200],
-    data: data.data || {}, // Store custom data
-    actions: data.data?.type === 'user-online' ? [
-      { action: 'connect', title: 'Connect Now' },
-      { action: 'dismiss', title: 'Later' }
-    ] : []
-  };
-  
+// --- NEW PUSH HANDLER (fetch full notification) ---
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    console.error("Invalid push payload", e);
+  }
+
+  // If payload contains ONLY notificationId -> fetch full notification
+  if (data.notificationId) {
+    event.waitUntil(
+      fetch(`/api/notifications/${data.notificationId}`)
+        .then((res) => res.json())
+        .then((note) => {
+          return self.registration.showNotification(note.title || "ONEVYOU", {
+            body: note.body || "",
+            icon: note.icon || "/icon.png",
+            data: { url: note.url || "/dashboard" }
+          });
+        })
+        .catch((err) => {
+          console.error("Failed to fetch full notification:", err);
+          return self.registration.showNotification("ONEVYOU", {
+            body: "You have a new notification"
+          });
+        })
+    );
+    return;
+  }
+
+  // Fallback (if push accidentally has full body)
   event.waitUntil(
-    self.registration.showNotification(data.title || 'ONEVYOU', options)
+    self.registration.showNotification(data.title || "ONEVYOU", {
+      body: data.body || "",
+      icon: data.icon || "/icon.png",
+      data: data.data || {}
+    })
   );
 });
+
 
 // Handle notification clicks
 self.addEventListener('notificationclick', function(event) {
