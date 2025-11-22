@@ -109,7 +109,6 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
     return baseUrls[platform] || "";
   };
 
-  console.log("TeacherCard Debug:", { name: displayName, bio, skills: skillsArray, hasProfileImage: !!profileImage });
 
   return (
     <Card className="group relative overflow-hidden transition-all duration-500 hover:shadow-xl hover:-translate-y-2 bg-card border-border/40 backdrop-blur-sm">
