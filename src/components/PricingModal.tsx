@@ -140,9 +140,10 @@ useEffect(() => {
       (async () => {
         try {
           const baseUrl = import.meta.env.VITE_API_URL || "";
-          const res = await fetch(`${baseUrl}/api/users/${tid}`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` }
-          });
+          const res = await fetch(`${baseUrl}/api/users/get?userId=${tid}`, {
+  headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
+});
+
           if (!res.ok) {
             setLoadingTiers(false);
             return;

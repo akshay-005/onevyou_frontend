@@ -15,9 +15,10 @@ async function prefetchTeacher(teacherId: string) {
 
     // fetch lightweight teacher info (pricing + basics)
     const baseUrl = import.meta.env.VITE_API_URL || "";
-    const res = await fetch(`${baseUrl}/api/users/${teacherId}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
-    });
+    const res = await fetch(`${baseUrl}/api/users/get?userId=${teacherId}`, {
+  headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
+});
+
     if (!res.ok) return;
     const json = await res.json();
     if (json?.success && json.user) {
