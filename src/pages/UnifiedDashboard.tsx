@@ -664,8 +664,18 @@ const onUserNowOnline = (data: any) => {
     socket.on("user:now-online", onUserNowOnline);
 
     // ✅ NEW: Listen for manual "I'm available" notification
-const onUserNowAvailable = (data: any) => {
+const onUserNowAvailable = async (data: any) => {
   console.log("📞 User is now available (manual notify):", data);
+
+  // ✅ Mark notification as seen when user views the toast
+  if (data.notificationId) {
+    try {
+      await api.dismissWaitingNotification(data.notificationId);
+      console.log("✅ Marked notification as seen:", data.notificationId);
+    } catch (err) {
+      console.error("Error marking notification as seen:", err);
+    }
+  }
 
   toast({
     title: "📞 User is Now Available!",
@@ -675,7 +685,6 @@ const onUserNowAvailable = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
-          // ✅ Same idea: minimal teacher, let modal logic fetch full details
           const teacherLike = {
             _id: data.userId,
             id: data.userId,
@@ -685,7 +694,7 @@ const onUserNowAvailable = (data: any) => {
           };
 
           console.log(
-            "🔍 Opening pricing from toast (now-available) for:",
+            "📝 Opening pricing from toast (now-available) for:",
             teacherLike.fullName
           );
           openPricingForTeacher(teacherLike);
