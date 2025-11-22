@@ -1,9 +1,12 @@
+import React, { useCallback, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Video, Star, IndianRupee, BookOpen, Instagram, Facebook, Youtube, Sparkles } from "lucide-react";
-import { useRef } from "react";
+
+
+
 
 
 // avoid duplicate concurrent prefetches across cards
@@ -59,6 +62,8 @@ async function prefetchTeacher(teacherId: string) {
 
 
 
+
+
 interface TeacherCardProps {
   teacher: {
     _id?: string;
@@ -107,6 +112,8 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
   // inside component
   const prefetchTimerRef = useRef<number | null>(null);
 
+ 
+
   
   // Skills - check array first, then fallback
   const skillsArray = Array.isArray(teacher.skills) ? teacher.skills : (teacher.profile?.skills || []);
@@ -122,11 +129,44 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
   const socialMedia = teacher.socialMedia || teacher.profile?.socialMedia || {};
   
   // Pricing tiers - ensure it's an array
-  const pricingTiers = Array.isArray(teacher.pricingTiers)
-    ? teacher.pricingTiers
-    : teacher.profile?.pricingTiers || [
-        { minutes: 1, price: teacher.ratePerMinute || 39 }
-      ];
+const pricingTiers = Array.isArray(teacher.pricingTiers)
+  ? teacher.pricingTiers
+  : teacher.profile?.pricingTiers || [
+      { minutes: 1, price: teacher.ratePerMinute || 39 }
+    ];
+
+// ----------------- Stable callbacks (avoid inline closures) -----------------
+const handleMouseEnter = useCallback(() => {
+  if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
+
+  if (prefetchTimerRef.current) window.clearTimeout(prefetchTimerRef.current);
+  prefetchTimerRef.current = window.setTimeout(() => {
+    prefetchTeacher(teacherId).catch(() => {});
+    prefetchTimerRef.current = null;
+  }, 300);
+}, [pricingTiers, teacherId]);
+
+const handleMouseLeave = useCallback(() => {
+  if (prefetchTimerRef.current) {
+    window.clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  }
+}, []);
+
+const handleFocus = useCallback(() => {
+  if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
+  prefetchTeacher(teacherId).catch(() => {});
+}, [pricingTiers, teacherId]);
+
+const handleClickConnect = useCallback(() => {
+  onConnect(teacherId);
+  if (!(pricingTiers && pricingTiers.length > 0) && !sessionStorage.getItem(PREFETCH_KEY(teacherId))) {
+    prefetchTeacher(teacherId).catch(() => {});
+  }
+}, [onConnect, teacherId, pricingTiers]);
+
+
+
 
   // Get starting price (minimum price)
   const startingPrice = pricingTiers.length
@@ -192,11 +232,13 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
           <Avatar className="h-12 w-12 ring-2 ring-primary/10 group-hover:ring-primary/20 transition-all flex-shrink-0">
             {profileImage && (
               <AvatarImage 
-                src={profileImage} 
-                alt={displayName}
-                className="object-cover"
-                loading="lazy"
-              />
+  src={profileImage} 
+  alt={displayName}
+  className="object-cover"
+  loading="lazy"
+  decoding="async"
+/>
+
             )}
             <AvatarFallback className="bg-gradient-primary text-primary-foreground text-sm font-medium">
               {initials}
@@ -284,35 +326,11 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
 <Button
   className="w-full bg-gradient-primary hover:opacity-90 transition-all duration-300 text-sm font-medium py-2.5 group/btn"
   size="sm"
-  onMouseEnter={() => {
-    // skip if teacher already has pricing or cache exists
-    if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
-    // debounce short hover to avoid spam
-    if (prefetchTimerRef.current) window.clearTimeout(prefetchTimerRef.current);
-    prefetchTimerRef.current = window.setTimeout(() => {
-      prefetchTeacher(teacherId).catch(() => {});
-      prefetchTimerRef.current = null;
-    }, 300);
-  }}
-  onMouseLeave={() => {
-    if (prefetchTimerRef.current) {
-      window.clearTimeout(prefetchTimerRef.current);
-      prefetchTimerRef.current = null;
-    }
-  }}
-  onFocus={() => {
-    // keyboard: prefetch immediately if needed
-    if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
-    prefetchTeacher(teacherId).catch(() => {});
-  }}
-  onClick={() => {
-    // open immediately (synchronous)
-    onConnect(teacherId);
-    // background prefetch if needed
-    if (!(pricingTiers && pricingTiers.length > 0) && !sessionStorage.getItem(PREFETCH_KEY(teacherId))) {
-      prefetchTeacher(teacherId).catch(() => {});
-    }
-  }}
+onMouseEnter={handleMouseEnter}
+onMouseLeave={handleMouseLeave}
+onFocus={handleFocus}
+onClick={handleClickConnect}
+
 >
   <Video className="mr-2 h-3.5 w-3.5 group-hover/btn:animate-pulse" />
   Connect Now
@@ -325,4 +343,4 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
   );
 };
 
-export default TeacherCard;
+export default React.memo(TeacherCard);

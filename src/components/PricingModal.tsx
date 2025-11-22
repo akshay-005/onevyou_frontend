@@ -26,6 +26,8 @@ import api from "@/utils/api";
 import { getUserSession } from "@/utils/storage";
 
 const PREFETCH_KEY = (id: string) => `teacher_cache_${id}`;
+const [liveCount, setLiveCount] = useState<number | null>(null);
+
 
 
 interface PricingModalProps {
@@ -58,6 +60,16 @@ const PricingModal = ({
   const [sortedTiers, setSortedTiers] = useState<{ minutes: number; price: number }[]>([]);
   const [walletBalance, setWalletBalance] = useState(0); 
   const [loadingTiers, setLoadingTiers] = useState(false);
+
+
+  useEffect(() => {
+  if (isOpen) {
+    setLiveCount(Math.floor(Math.random() * 20) + 5);
+  } else {
+    setLiveCount(null);
+  }
+}, [isOpen, teacher]);
+
 
 
   // ✅ Load and sort pricing tiers whenever teacher changes
@@ -477,8 +489,9 @@ rzp.open();
           <div className="bg-gradient-to-r from-primary/10 to-accent/10 rounded-lg p-2.5 flex items-center gap-2 mb-4">
             <Sparkles className="h-4 w-4 text-primary animate-pulse flex-shrink-0" />
             <p className="text-xs font-medium">
-              🔥 {Math.floor(Math.random() * 20) + 5} students learning with {teacher.name} right now!
-            </p>
+  🔥 {liveCount ?? "—"} students learning with {teacher.name} right now!
+</p>
+
           </div>
 
           {/* Duration Selection - Compact */}
