@@ -69,3 +69,52 @@ self.addEventListener('notificationclick', function(event) {
       })
   );
 });
+
+// --- RUNTIME CACHING: images and API ---
+// Add below your existing listeners in sw.js
+const IMAGE_CACHE = "onevyou-images-v1";
+const API_CACHE = "onevyou-api-v1";
+
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  const url = new URL(req.url);
+
+  // 1) Images: cache-first
+  if (req.destination === "image" || url.pathname.match(/\.(png|jpg|jpeg|webp|avif)$/i)) {
+    event.respondWith(
+      caches.open(IMAGE_CACHE).then(async (cache) => {
+        const cached = await cache.match(req);
+        if (cached) return cached;
+        try {
+          const res = await fetch(req);
+          if (res && res.ok) cache.put(req, res.clone());
+          return res;
+        } catch (err) {
+          return cached || fetch(req);
+        }
+      })
+    );
+    return;
+  }
+
+  // 2) API GETs: stale-while-revalidate for same-origin /api/*
+  if (req.method === "GET" && url.origin === self.location.origin && url.pathname.startsWith("/api/")) {
+    event.respondWith(
+      caches.open(API_CACHE).then(async (cache) => {
+        const cachedResponse = await cache.match(req);
+        const networkPromise = fetch(req)
+          .then((networkResponse) => {
+            if (networkResponse && networkResponse.ok) cache.put(req, networkResponse.clone());
+            return networkResponse;
+          })
+          .catch(() => null);
+
+        // Return cached if present, else wait for network
+        return cachedResponse || networkPromise;
+      })
+    );
+    return;
+  }
+
+  // default: let the network handle it
+});

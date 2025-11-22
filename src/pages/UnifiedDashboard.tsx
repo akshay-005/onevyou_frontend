@@ -264,20 +264,28 @@ useEffect(() => {
 
       // ✅ Check existing subscription first
       let existing = await registration.pushManager.getSubscription();
-      console.log("📬 Existing subscription:", existing);
+// dev-only logging
+if (import.meta.env.DEV) console.debug("📬 Existing subscription:", existing);
 
-      if (existing) {
-        console.log("♻️ Reusing existing push subscription");
-        const payload = existing.toJSON ? existing.toJSON() : JSON.parse(JSON.stringify(existing));
-        const res = await api.savePushSubscription(currentUser._id, payload);
+const pushSavedKey = `pushSaved:${currentUser._id}`;
 
-        if (res.success) {
-          console.log("✅ Existing push subscription saved successfully!");
-        } else {
-          console.error("❌ Failed to save existing subscription:", res);
-        }
-        return;
-      }
+// If subscription exists and we've already saved it from this browser, skip saving again
+if (existing) {
+  if (!localStorage.getItem(pushSavedKey)) {
+    const payload = existing.toJSON ? existing.toJSON() : JSON.parse(JSON.stringify(existing));
+    const res = await api.savePushSubscription(currentUser._id, payload);
+    if (res?.success) {
+      localStorage.setItem(pushSavedKey, "1");
+      if (import.meta.env.DEV) console.debug("✅ Existing push subscription saved successfully!");
+    } else {
+      console.error("❌ Failed to save existing subscription:", res);
+    }
+  } else {
+    if (import.meta.env.DEV) console.debug("♻️ Existing push subscription already saved (skipping network save).");
+  }
+  return;
+}
+
 
       // ✅ Create new subscription if none exists
       const appServerKey = urlBase64ToUint8Array(vapidKey);
@@ -395,21 +403,82 @@ useEffect(() => {
 }, []);
 
   // Fetch online users
-  const fetchOnlineUsers = async () => {
-    try {
-      const json = await api.getOnlineUsers();
+  // Replace the old fetchOnlineUsers implementation with this
+const fetchOnlineUsers = async () => {
+  try {
+    const token = localStorage.getItem("userToken");
+    const headers = { Authorization: `Bearer ${token}` };
+
+    // 1) Try cached endpoint first (saves data when server returns 304)
+    const cachedRes = await fetch(`${import.meta.env.VITE_API_URL || ""}/api/users/all-cached`, {
+      method: "GET",
+      headers
+    });
+
+    // If server returns 304 (not modified), browser/service-worker may have the cached body.
+    // But fetch won't give us the cached JSON automatically in a plain fetch() call when response is 304,
+    // so attempt to read body if status 200; if 304, fallback to cached data in localStorage (see below).
+    if (cachedRes.status === 200) {
+      const json = await cachedRes.json();
       if (json?.success) {
         const all = json.users || [];
         const myId = currentUser?._id || localStorage.getItem("userId");
-        const others = all.filter((u: any) => u._id !== myId);
+        const others = all.filter((u) => u._id !== myId);
         setUsers(others);
         setOnlineCount(others.length);
-        console.log("Fetched online users:", others.length);
+
+        // store a local copy for 304 fallback (optional)
+        try { localStorage.setItem("cachedUsersBody", JSON.stringify({ users: others, etag: cachedRes.headers.get("ETag") })); } catch(e){}
+        if (import.meta.env.DEV) console.debug("Fetched online users (cached endpoint):", others.length);
+        return;
       }
-    } catch (err) {
-      console.error("Fetch users error:", err);
     }
-  };
+
+    // If cached endpoint gave 304 or non-200, attempt to use already-stored cached body
+    if (cachedRes.status === 304) {
+      // Try to pick up previously saved cached body in localStorage (if service worker didn't hydrate)
+      const saved = localStorage.getItem("cachedUsersBody");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          const all = parsed.users || [];
+          const myId = currentUser?._id || localStorage.getItem("userId");
+          const others = all.filter((u) => u._id !== myId);
+          setUsers(others);
+          setOnlineCount(others.length);
+          if (import.meta.env.DEV) console.debug("Used saved cached users (304).");
+          return;
+        } catch (e) {
+          if (import.meta.env.DEV) console.warn("Failed to parse saved cached users:", e);
+        }
+      }
+    }
+
+    // 2) Fallback: call the original /all endpoint as before (keeps backward compatibility)
+    const fallbackRes = await fetch(`${import.meta.env.VITE_API_URL || ""}/api/users/all`, {
+      method: "GET",
+      headers
+    });
+    if (fallbackRes.ok) {
+      const json2 = await fallbackRes.json();
+      if (json2?.success) {
+        const all = json2.users || [];
+        const myId = currentUser?._id || localStorage.getItem("userId");
+        const others = all.filter((u) => u._id !== myId);
+        setUsers(others);
+        setOnlineCount(others.length);
+        if (import.meta.env.DEV) console.debug("Fetched online users (fallback /all):", others.length);
+        return;
+      }
+    }
+
+    // If everything fails:
+    if (import.meta.env.DEV) console.warn("Failed to fetch online users from cached and fallback endpoints", { cachedStatus: cachedRes.status });
+  } catch (err) {
+    console.error("Fetch users error:", err);
+  }
+};
+
 
   // ✅ FIXED: Socket event handling - removed problematic dependency array
   useEffect(() => {

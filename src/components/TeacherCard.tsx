@@ -138,6 +138,7 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
                 src={profileImage} 
                 alt={displayName}
                 className="object-cover"
+                loading="lazy"
               />
             )}
             <AvatarFallback className="bg-gradient-primary text-primary-foreground text-sm font-medium">
