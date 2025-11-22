@@ -3,26 +3,44 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Video, Star, IndianRupee, BookOpen, Instagram, Facebook, Youtube, Sparkles } from "lucide-react";
+import { useRef } from "react";
+
+
+// avoid duplicate concurrent prefetches across cards
+const inflightPrefetch = (window as any).__onevyou_inflight_prefetch__ || new Set<string>();
+(window as any).__onevyou_inflight_prefetch__ = inflightPrefetch;
+
 
 
 // ---------- PREFETCH HELPERS ----------
 const PREFETCH_KEY = (id: string) => `teacher_cache_${id}`;
 async function prefetchTeacher(teacherId: string) {
   try {
-    if (!teacherId) return;
-    // If already cached for this session, skip
-    if (sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
+    if (!teacherId || teacherId.length < 6) return; // quick validation
+    const key = PREFETCH_KEY(teacherId);
 
-    // fetch lightweight teacher info (pricing + basics)
+    // already cached -> skip
+    if (sessionStorage.getItem(key)) return;
+
+    // already inflight -> skip
+    if (inflightPrefetch.has(teacherId)) return;
+    inflightPrefetch.add(teacherId);
+
     const baseUrl = import.meta.env.VITE_API_URL || "";
     const res = await fetch(`${baseUrl}/api/users/get?userId=${teacherId}`, {
-  headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
-});
+      headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
+    });
 
-    if (!res.ok) return;
+    if (!res.ok) {
+      // If 404, cache a small sentinel so we don't refetch repeatedly
+      if (res.status === 404) {
+        try { sessionStorage.setItem(key, JSON.stringify({ _missing: true, ts: Date.now() })); } catch(e){}
+      }
+      return;
+    }
+
     const json = await res.json();
     if (json?.success && json.user) {
-      // store only what modal needs
       const small = {
         _id: json.user._id,
         name: json.user.fullName || json.user.name,
@@ -30,13 +48,15 @@ async function prefetchTeacher(teacherId: string) {
         expertise: json.user.skills?.[0] || json.user.expertise || "",
         rating: json.user.profile?.rating || json.user.rating || 4.8,
       };
-      try { sessionStorage.setItem(PREFETCH_KEY(teacherId), JSON.stringify(small)); } catch(e) {}
+      try { sessionStorage.setItem(key, JSON.stringify(small)); } catch(e) {}
     }
   } catch (e) {
-    // quietly ignore prefetch errors
     if (import.meta.env.DEV) console.debug("prefetchTeacher failed", e);
+  } finally {
+    inflightPrefetch.delete(teacherId);
   }
 }
+
 
 
 interface TeacherCardProps {
@@ -84,6 +104,9 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
   const teacherId = teacher._id || teacher.id || "";
   const displayName = teacher.fullName || teacher.name || "User";
   const profileImage = teacher.profileImage || teacher.avatar || "";
+  // inside component
+  const prefetchTimerRef = useRef<number | null>(null);
+
   
   // Skills - check array first, then fallback
   const skillsArray = Array.isArray(teacher.skills) ? teacher.skills : (teacher.profile?.skills || []);
@@ -257,17 +280,45 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
         </div>
 
         {/* Connect Button */}
+{/* Connect Button - debounced prefetch + instant open */}
 <Button
   className="w-full bg-gradient-primary hover:opacity-90 transition-all duration-300 text-sm font-medium py-2.5 group/btn"
-  onMouseEnter={() => prefetchTeacher(teacherId)}
-  onFocus={() => prefetchTeacher(teacherId)}
-  onClick={() => onConnect(teacherId)}
   size="sm"
+  onMouseEnter={() => {
+    // skip if teacher already has pricing or cache exists
+    if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
+    // debounce short hover to avoid spam
+    if (prefetchTimerRef.current) window.clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = window.setTimeout(() => {
+      prefetchTeacher(teacherId).catch(() => {});
+      prefetchTimerRef.current = null;
+    }, 300);
+  }}
+  onMouseLeave={() => {
+    if (prefetchTimerRef.current) {
+      window.clearTimeout(prefetchTimerRef.current);
+      prefetchTimerRef.current = null;
+    }
+  }}
+  onFocus={() => {
+    // keyboard: prefetch immediately if needed
+    if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
+    prefetchTeacher(teacherId).catch(() => {});
+  }}
+  onClick={() => {
+    // open immediately (synchronous)
+    onConnect(teacherId);
+    // background prefetch if needed
+    if (!(pricingTiers && pricingTiers.length > 0) && !sessionStorage.getItem(PREFETCH_KEY(teacherId))) {
+      prefetchTeacher(teacherId).catch(() => {});
+    }
+  }}
 >
   <Video className="mr-2 h-3.5 w-3.5 group-hover/btn:animate-pulse" />
   Connect Now
   <Sparkles className="ml-1.5 h-3 w-3 opacity-60" />
 </Button>
+
 
       </CardContent>
     </Card>

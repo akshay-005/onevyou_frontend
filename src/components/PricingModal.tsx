@@ -61,24 +61,51 @@ const PricingModal = ({
 
 
   // ✅ Load and sort pricing tiers whenever teacher changes
-  useEffect(() => {
-    if (teacher?.pricingTiers && Array.isArray(teacher.pricingTiers)) {
-      const sorted = [...teacher.pricingTiers].sort((a, b) => a.minutes - b.minutes);
-      setSortedTiers(sorted);
-      
-      console.log("💰 PricingModal loaded with tiers:", sorted);
-      
-      // Auto-select first tier (usually 1 minute)
-      if (sorted.length > 0) {
-        setSelectedDuration(sorted[0].minutes);
-        console.log("✅ Auto-selected duration:", sorted[0].minutes);
+ // ✅ Load and sort pricing tiers whenever teacher changes — merge prefetched cache for instant UI
+useEffect(() => {
+  try {
+    // 1) prefer server-provided teacher.pricingTiers if present
+    let tiers = (teacher?.pricingTiers && Array.isArray(teacher.pricingTiers))
+      ? [...teacher.pricingTiers]
+      : teacher?.profile?.pricingTiers ? [...teacher.profile.pricingTiers] : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }];
+
+    // 2) attempt to merge prefetched cache if it has valid pricing (sessionStorage)
+    try {
+      const tid = (teacher?.id || teacher?._id)?.toString();
+      if (tid) {
+        const cached = sessionStorage.getItem(PREFETCH_KEY(tid));
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.pricingTiers && Array.isArray(parsed.pricingTiers) && parsed.pricingTiers.length > 0) {
+            // prefer parsed pricing if current tiers are missing or shorter
+            if (!tiers || tiers.length === 0 || parsed.pricingTiers.length >= tiers.length) {
+              tiers = [...parsed.pricingTiers];
+              if (import.meta.env.DEV) console.debug("Using cached pricingTiers from session for instant UI", tid);
+            }
+          }
+        }
       }
-    } else {
-      console.warn("⚠️ No pricing tiers found, using default");
-      setSortedTiers([{ minutes: 1, price: 39 }]);
-      setSelectedDuration(1);
+    } catch (err) {
+      if (import.meta.env.DEV) console.debug("Failed to merge cached pricing", err);
     }
-  }, [teacher]);
+
+    // sort and set synchronously for instant render
+    const sorted = tiers.sort((a, b) => a.minutes - b.minutes);
+    setSortedTiers(sorted);
+
+    if (sorted.length > 0) {
+      setSelectedDuration(prev => prev === null ? sorted[0].minutes : prev);
+      if (import.meta.env.DEV) console.debug("PricingModal loaded with tiers:", sorted);
+    } else {
+      setSortedTiers([{ minutes: 1, price: 39 }]);
+      setSelectedDuration(prev => prev === null ? 1 : prev);
+      if (import.meta.env.DEV) console.warn("⚠️ No pricing tiers found, using default");
+    }
+  } catch (e) {
+    if (import.meta.env.DEV) console.debug("pricing tiers effect error", e);
+  }
+}, [teacher]);
+
 
   // ✅ Load user data and wallet balance on mount
 // ✅ Non-blocking: use cached session + background refresh (instant UI)
@@ -393,12 +420,8 @@ rzp.open();
   // ✅ Check if button should be enabled
   const isButtonEnabled = selectedDuration !== null && paymentMethod !== "";
   
-  console.log("🔘 Button state:", { 
-    isButtonEnabled, 
-    selectedDuration, 
-    paymentMethod 
-  });
-
+  if (import.meta.env.DEV) console.debug("🔘 Button state:", { isButtonEnabled, selectedDuration, paymentMethod });
+  
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
