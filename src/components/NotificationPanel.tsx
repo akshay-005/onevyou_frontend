@@ -295,73 +295,47 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   };
 
   // ✅ FIXED: Now sends proper notification
- const handleNotifyWaiting = async (notification: any) => {
-  try {
-    console.log("🔔 Notifying user:", notification.waitingUserId._id);
-    
-    if (!socket || !socket.connected) {
-      toast({
-        title: "Connection Error",
-        description: "Please check your internet connection",
-        variant: "destructive",
+  const handleNotifyWaiting = async (notification: any) => {
+    try {
+      console.log("🔔 Notifying user:", notification.waitingUserId._id);
+      
+      if (!socket || !socket.connected) {
+        toast({
+          title: "Connection Error",
+          description: "Please check your internet connection",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // ✅ Emit socket event to notify the waiting user
+      socket.emit("user:notify-available", {
+        targetUserId: notification.waitingUserId._id,
+        notificationId: notification._id,
       });
-      return;
-    }
 
-    // ✅ Emit socket event
-    socket.emit("user:notify-available", {
-      targetUserId: notification.waitingUserId._id,
-      notificationId: notification._id,
-    });
-
-    // ✅ Listen for success
-    const successHandler = (data: any) => {
       toast({
         title: "Notification Sent! ✅",
-        description: data.message || `${notification.waitingUserId.fullName} will be notified`,
+        description: `${notification.waitingUserId.fullName} has been notified you're online`,
       });
 
+      // ✅ Remove from local state (will be deleted on backend)
       setWaitingNotifications(prev => 
         prev.filter(n => n._id !== notification._id)
       );
 
+      // Update dashboard count
       window.dispatchEvent(new Event('notification-dismissed'));
-      socket.off("notification:sent", successHandler);
-    };
 
-    const errorHandler = (data: any) => {
+    } catch (err) {
+      console.error("Error notifying user:", err);
       toast({
         title: "Error",
-        description: data.message || "Failed to send notification",
+        description: "Failed to send notification",
         variant: "destructive",
       });
-      socket.off("notification:sent", errorHandler);
-    };
-
-    // ✅ Listen for both success and error
-    socket.once("notification:sent", (data) => {
-      if (data.success) {
-        successHandler(data);
-      } else {
-        errorHandler(data);
-      }
-    });
-
-    // Timeout fallback
-    setTimeout(() => {
-      socket.off("notification:sent", successHandler);
-      socket.off("notification:sent", errorHandler);
-    }, 5000);
-
-  } catch (err) {
-    console.error("Error notifying user:", err);
-    toast({
-      title: "Error",
-      description: "Failed to send notification",
-      variant: "destructive",
-    });
-  }
-};
+    }
+  };
 
   const isConnecting = !socket || !isSocketReady;
 
