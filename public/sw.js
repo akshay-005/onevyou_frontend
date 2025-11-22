@@ -13,22 +13,46 @@ self.addEventListener("push", (event) => {
   // If payload contains ONLY notificationId -> fetch full notification
   if (data.notificationId) {
     event.waitUntil(
-      fetch(`/api/notifications/${data.notificationId}`)
-        .then((res) => res.json())
-        .then((note) => {
-          return self.registration.showNotification(note.title || "ONEVYOU", {
-            body: note.body || "",
-            icon: note.icon || "/icon.png",
-            data: { url: note.url || "/dashboard" }
-          });
-        })
-        .catch((err) => {
-          console.error("Failed to fetch full notification:", err);
-          return self.registration.showNotification("ONEVYOU", {
-            body: "You have a new notification"
-          });
-        })
-    );
+  (async () => {
+    try {
+      const res = await fetch(`/api/notifications/${data.notificationId}`);
+
+      const contentType = res.headers.get("content-type") || "";
+
+      if (!res.ok) {
+        // Server returned 404 or HTML → avoid json() parsing
+        const text = await res.text();
+        console.warn("SW: Non-OK response for notification:", res.status, text.slice(0, 100));
+        return self.registration.showNotification("ONEVYOU", {
+          body: "You have a new notification"
+        });
+      }
+
+      if (contentType.includes("application/json")) {
+        const note = await res.json();
+
+        return self.registration.showNotification(note.title || "ONEVYOU", {
+          body: note.body || "",
+          icon: note.icon || "/icon.png",
+          data: { url: note.url || "/dashboard" }
+        });
+      } else {
+        // HTML response — fallback notification
+        const html = await res.text();
+        console.warn("SW: Expected JSON but got HTML:", html.slice(0, 200));
+        return self.registration.showNotification("ONEVYOU", {
+          body: "You have a new notification"
+        });
+      }
+    } catch (err) {
+      console.warn("SW fetch error:", err);
+      return self.registration.showNotification("ONEVYOU", {
+        body: "You have a new notification"
+      });
+    }
+  })()
+);
+
     return;
   }
 
