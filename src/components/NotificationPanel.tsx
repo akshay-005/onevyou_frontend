@@ -111,26 +111,36 @@ const NotificationPanel = ({ requests: externalRequests }: NotificationPanelProp
   
   console.log("📋 NotificationPanel requests:", requests.length);
 
-  // ✅ Load waiting notifications (people who want to connect with me)
-  useEffect(() => {
-    const loadWaitingNotifications = async () => {
-      try {
-        const res = await api.getMyWaitingNotifications();
-        if (res.success && res.notifications) {
-          setWaitingNotifications(res.notifications);
-          console.log("📬 Loaded waiting notifications:", res.notifications.length);
+// ✅ Load waiting notifications (people who want to connect with me)
+// Only show "waiting" type - "now-available" are toast-only
+useEffect(() => {
+  const loadWaitingNotifications = async () => {
+    try {
+      const res = await api.getMyWaitingNotifications();
+      if (res.success && res.notifications) {
+        // ✅ CRITICAL: Filter out "now-available" - those are for toasts only
+        const waitingOnly = res.notifications.filter(
+          (n: any) => n.type === "waiting" || !n.type // backwards compatibility
+        );
+        setWaitingNotifications(waitingOnly);
+        console.log("📬 Loaded WAITING notifications:", waitingOnly.length);
+        
+        const filtered = res.notifications.length - waitingOnly.length;
+        if (filtered > 0) {
+          console.log(`🔕 Filtered out ${filtered} "now-available" notifications (toast-only)`);
         }
-      } catch (err) {
-        console.error("Error loading notifications:", err);
       }
-    };
+    } catch (err) {
+      console.error("Error loading notifications:", err);
+    }
+  };
 
-    loadWaitingNotifications();
-    
-    // Refresh every 30 seconds
-    const interval = setInterval(loadWaitingNotifications, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  loadWaitingNotifications();
+  
+  // Refresh every 30 seconds
+  const interval = setInterval(loadWaitingNotifications, 30000);
+  return () => clearInterval(interval);
+}, []);
 
   useEffect(() => {
     if (!socket) return;
