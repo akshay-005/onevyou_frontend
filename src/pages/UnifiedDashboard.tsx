@@ -1328,7 +1328,7 @@ socket.on("user:now-available", onUserNowAvailable);
           {/* Available users */}
           <div className="mb-8">
             <h3 className="text-lg font-semibold mb-4">
-              Available Users ({onlineCount})
+              All Users {/* ({onlineCount})  */}
             </h3>
             <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {filteredUsers.map((u, i) => {

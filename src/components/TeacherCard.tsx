@@ -4,6 +4,40 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Video, Star, IndianRupee, BookOpen, Instagram, Facebook, Youtube, Sparkles } from "lucide-react";
 
+
+// ---------- PREFETCH HELPERS ----------
+const PREFETCH_KEY = (id: string) => `teacher_cache_${id}`;
+async function prefetchTeacher(teacherId: string) {
+  try {
+    if (!teacherId) return;
+    // If already cached for this session, skip
+    if (sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
+
+    // fetch lightweight teacher info (pricing + basics)
+    const baseUrl = import.meta.env.VITE_API_URL || "";
+    const res = await fetch(`${baseUrl}/api/users/${teacherId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
+    });
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json?.success && json.user) {
+      // store only what modal needs
+      const small = {
+        _id: json.user._id,
+        name: json.user.fullName || json.user.name,
+        pricingTiers: json.user.pricingTiers || json.user.profile?.pricingTiers || [],
+        expertise: json.user.skills?.[0] || json.user.expertise || "",
+        rating: json.user.profile?.rating || json.user.rating || 4.8,
+      };
+      try { sessionStorage.setItem(PREFETCH_KEY(teacherId), JSON.stringify(small)); } catch(e) {}
+    }
+  } catch (e) {
+    // quietly ignore prefetch errors
+    if (import.meta.env.DEV) console.debug("prefetchTeacher failed", e);
+  }
+}
+
+
 interface TeacherCardProps {
   teacher: {
     _id?: string;
@@ -222,15 +256,18 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
         </div>
 
         {/* Connect Button */}
-        <Button 
-          className="w-full bg-gradient-primary hover:opacity-90 transition-all duration-300 text-sm font-medium py-2.5 group/btn"
-          onClick={() => onConnect(teacherId)}
-          size="sm"
-        >
-          <Video className="mr-2 h-3.5 w-3.5 group-hover/btn:animate-pulse" />
-          Connect Now
-          <Sparkles className="ml-1.5 h-3 w-3 opacity-60" />
-        </Button>
+<Button
+  className="w-full bg-gradient-primary hover:opacity-90 transition-all duration-300 text-sm font-medium py-2.5 group/btn"
+  onMouseEnter={() => prefetchTeacher(teacherId)}
+  onFocus={() => prefetchTeacher(teacherId)}
+  onClick={() => onConnect(teacherId)}
+  size="sm"
+>
+  <Video className="mr-2 h-3.5 w-3.5 group-hover/btn:animate-pulse" />
+  Connect Now
+  <Sparkles className="ml-1.5 h-3 w-3 opacity-60" />
+</Button>
+
       </CardContent>
     </Card>
   );

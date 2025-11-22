@@ -25,6 +25,9 @@ import {
 import api from "@/utils/api";
 import { getUserSession } from "@/utils/storage";
 
+const PREFETCH_KEY = (id: string) => `teacher_cache_${id}`;
+
+
 interface PricingModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -54,6 +57,8 @@ const PricingModal = ({
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [sortedTiers, setSortedTiers] = useState<{ minutes: number; price: number }[]>([]);
   const [walletBalance, setWalletBalance] = useState(0); 
+  const [loadingTiers, setLoadingTiers] = useState(false);
+
 
   // ✅ Load and sort pricing tiers whenever teacher changes
   useEffect(() => {
@@ -76,35 +81,100 @@ const PricingModal = ({
   }, [teacher]);
 
   // ✅ Load user data and wallet balance on mount
+// ✅ Non-blocking: use cached session + background refresh (instant UI)
 useEffect(() => {
-  const loadUser = async () => {
+  let cancelled = false;
+
+  const loadInitial = async () => {
     try {
-      const { user } = getUserSession();
-      
-      if (user) {
-        setCurrentUser(user);
-      } else {
-        const response = await api.getMe();
-        if (response?.success && response?.user) {
-          setCurrentUser(response.user);
+      // 1) Try session cached teacher/pricing for instant UI (prefetch from TeacherCard)
+      const tid = (teacher?.id || teacher?._id)?.toString();
+      if (tid) {
+        const cached = sessionStorage.getItem(PREFETCH_KEY(tid));
+        if (cached) {
+          if (import.meta.env.DEV) console.debug("Using prefetched teacher data", tid);
+          // we don't overwrite sortedTiers here to avoid side-effects — sortedTiers is derived from `teacher` prop
         }
       }
-      
-      // ✅ Fetch wallet balance
-      const walletRes = await api.getWalletBalance();
-      if (walletRes.success) {
-        setWalletBalance(walletRes.wallet.availableBalance);
-        console.log("💰 Wallet balance loaded:", walletRes.wallet.availableBalance);
+    } catch (e) {
+      if (import.meta.env.DEV) console.debug("prefetch read failed", e);
+    }
+
+    // 2) Load current user quickly from session, then fetch fresh in background
+    try {
+      const session = getUserSession?.();
+      if (session?.user) {
+        setCurrentUser(session.user);
+      } else {
+        api.getMe()
+          .then((res) => { if (!cancelled && res?.success) setCurrentUser(res.user); })
+          .catch(() => {});
       }
-    } catch (err) {
-      console.error("❌ Error loading user:", err);
+    } catch (e) {
+      if (import.meta.env.DEV) console.debug("getUserSession failed", e);
+    }
+
+    // 3) Wallet: use sessionStorage first, then fetch in background
+    try {
+      const wb = sessionStorage.getItem("walletBalance");
+      if (wb) setWalletBalance(Number(wb));
+    } catch (e) {}
+
+    (async () => {
+      try {
+        const walletRes = await api.getWalletBalance();
+        if (!cancelled && walletRes?.success) {
+          setWalletBalance(walletRes.wallet.availableBalance);
+          try { sessionStorage.setItem("walletBalance", String(walletRes.wallet.availableBalance)); } catch(e){}
+          if (import.meta.env.DEV) console.debug("Wallet refreshed in background");
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) console.debug("wallet fetch failed", err);
+      }
+    })();
+
+    // 4) Background refresh: fetch fresh teacher/pricing and update session cache
+    if (teacher?.id || teacher?._id) {
+      setLoadingTiers(true);
+      const tid = (teacher.id || teacher._id).toString();
+      (async () => {
+        try {
+          const baseUrl = import.meta.env.VITE_API_URL || "";
+          const res = await fetch(`${baseUrl}/api/users/${tid}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` }
+          });
+          if (!res.ok) {
+            setLoadingTiers(false);
+            return;
+          }
+          const json = await res.json();
+          if (json?.success && json.user) {
+            const small = {
+              _id: json.user._id,
+              name: json.user.fullName || json.user.name,
+              pricingTiers: json.user.pricingTiers || json.user.profile?.pricingTiers || [],
+              expertise: json.user.skills?.[0] || json.user.expertise || "",
+              rating: json.user.profile?.rating || json.user.rating || 4.8,
+            };
+            try { sessionStorage.setItem(PREFETCH_KEY(tid), JSON.stringify(small)); } catch(e){}
+            if (!cancelled && import.meta.env.DEV) console.debug("Prefetch cache updated for", tid);
+          }
+        } catch (err) {
+          if (import.meta.env.DEV) console.debug("Error fetching teacher details:", err);
+        } finally {
+          if (!cancelled) setLoadingTiers(false);
+        }
+      })();
     }
   };
 
-  if (isOpen) {
-    loadUser();
-  }
-}, [isOpen]);
+  if (isOpen) loadInitial();
+
+  return () => {
+    cancelled = true;
+  };
+}, [isOpen, teacher]);
+
 
   // ✅ Get selected tier details
   const getSelectedTier = () => {
