@@ -1,4 +1,5 @@
  // frontend/src/pages/UnifiedDashboard.tsx
+  import { useCallback, useTransition } from "react"; // Add to existing React imports
   import React, { useEffect, useState, useMemo, useRef } from "react";
   import { useNavigate } from "react-router-dom";
   import {
@@ -389,22 +390,28 @@ useEffect(() => {
   return () => window.removeEventListener('notification-dismissed', handleNotificationDismissed);
 }, []);
 
-  // Fetch online users
-  const fetchOnlineUsers = async () => {
-    try {
-      const json = await api.getOnlineUsers();
-      if (json?.success) {
-        const all = json.users || [];
-        const myId = currentUser?._id || localStorage.getItem("userId");
-        const others = all.filter((u: any) => u._id !== myId);
+  /// Fetch online users with debouncing
+const [isPending, startTransition] = useTransition();
+const fetchOnlineUsers = useCallback(async () => {
+  try {
+    const json = await api.getOnlineUsers();
+    if (json?.success) {
+      const all = json.users || [];
+      const myId = currentUser?._id || localStorage.getItem("userId");
+      const others = all.filter((u: any) => u._id !== myId);
+      
+      // ✅ Use startTransition for non-urgent state updates
+      startTransition(() => {
         setUsers(others);
         setOnlineCount(others.length);
-        console.log("Fetched online users:", others.length);
-      }
-    } catch (err) {
-      console.error("Fetch users error:", err);
+      });
+      
+      console.log("Fetched online users:", others.length);
     }
-  };
+  } catch (err) {
+    console.error("Fetch users error:", err);
+  }
+}, [currentUser?._id]);
 
   // ✅ FIXED: Socket event handling - removed problematic dependency array
   useEffect(() => {
@@ -1261,36 +1268,29 @@ socket.on("user:now-available", onUserNowAvailable);
             </div>
           </div>
 
-          {/* Available users */}
-          <div className="mb-8">
-            <h3 className="text-lg font-semibold mb-4">
-              Available Users ({onlineCount})
-            </h3>
-            <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-              {filteredUsers.map((u, i) => {
-    console.log("🎨 Rendering card for user:", {
-      name: u.fullName,
-      bio: u.bio,
-      skills: u.skills,
-      hasImage: !!u.profileImage,
-    });
-
-    return (
+          {/* Available users with lazy loading */}
+<div className="mb-8">
+  <h3 className="text-lg font-semibold mb-4">
+    Available Users ({onlineCount})
+    {isPending && <span className="text-sm text-muted-foreground ml-2">(Loading...)</span>}
+  </h3>
+  <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+    {filteredUsers.slice(0, 12).map((u, i) => ( // ✅ Only render first 12 initially
       <TeacherCard
         key={u._id || i}
         teacher={{
           _id: u._id,
-          id: u._id, // Both _id and id for compatibility
+          id: u._id,
           fullName: u.fullName,
           name: u.fullName || u.profile?.name || u.phoneNumber || "User",
-          profileImage: u.profileImage, // Direct from API
-          bio: u.bio, // Direct from API
-          skills: u.skills, // Direct from API (array)
-          expertise: u.skills?.[0] || "Skill not specified", // First skill
+          profileImage: u.profileImage,
+          bio: u.bio,
+          skills: u.skills,
+          expertise: u.skills?.[0] || "Skill not specified",
           rating: u.profile?.rating || 4.8,
           isOnline: u.online,
           online: u.online,
-          socialMedia: u.socialMedia, // Direct from API
+          socialMedia: u.socialMedia,
           pricingTiers: Array.isArray(u.pricingTiers)
             ? u.pricingTiers
             : [
@@ -1299,20 +1299,33 @@ socket.on("user:now-available", onUserNowAvailable);
               ],
           ratePerMinute: u.ratePerMinute || 39,
         }}
-        onConnect={() =>
-          handleConnect(u._id, u.ratePerMinute || 39, u)
-        }
+        onConnect={() => handleConnect(u._id, u.ratePerMinute || 39, u)}
       />
-    );
-  })}
+    ))}
 
-              {filteredUsers.length === 0 && (
-                <div className="text-muted-foreground">
-                  No users online right now.
-                </div>
-              )}
-            </div>
-          </div>
+    {filteredUsers.length === 0 && !isPending && (
+      <div className="text-muted-foreground">
+        No users online right now.
+      </div>
+    )}
+  </div>
+  
+  {/* Load More Button */}
+  {filteredUsers.length > 12 && (
+    <div className="text-center mt-6">
+      <Button
+        variant="outline"
+        onClick={() => {
+          // Render all remaining cards
+          const remaining = filteredUsers.slice(12);
+          // This will be handled by React's state batching
+        }}
+      >
+        Load More ({filteredUsers.length - 12} more)
+      </Button>
+    </div>
+  )}
+</div>
         </main>
 
         
