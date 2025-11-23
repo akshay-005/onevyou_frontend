@@ -70,11 +70,6 @@
     Linkedin,
   } from "lucide-react";
 
-  const debug = (msg?: any, ...args: any[]) => {
-  if (import.meta.env.DEV) console.debug(msg, ...args);
-};
-
-
   const UnifiedDashboard: React.FC = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -164,15 +159,14 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
         const saved = localStorage.getItem("isOnline");
         const restored = saved === "true";
         const finalState = restored ? true : false;
-        if (import.meta.env.DEV) console.debug("Initial load: forcing isOnline =", finalState);
-
+        console.log("Initial load: forcing isOnline =", finalState);
         setIsOnline(finalState);
         initialLoadComplete.current = true;
       }
 
       // ✅ NEW: Always fetch online users once after login (even if user is offline)
       setTimeout(() => {
-        if (import.meta.env.DEV) console.debug("🔄 Initial fetch of online users after login");
+        console.log("🔄 Initial fetch of online users after login");
         fetchOnlineUsers();
       }, 500);
     }
@@ -240,6 +234,7 @@ useEffect(() => {
       }
 
       const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      console.log("🔑 VAPID key from env:", vapidKey, "length:", vapidKey?.length);
 
       if (!vapidKey) {
         console.warn("⚠️ VAPID public key not configured");
@@ -247,7 +242,7 @@ useEffect(() => {
       }
 
       const registration = await navigator.serviceWorker.ready;
-      
+      console.log("👷 SW ready:", registration);
 
       // Permissions
       if (Notification.permission === "default") {
@@ -264,32 +259,24 @@ useEffect(() => {
 
       // ✅ Check existing subscription first
       let existing = await registration.pushManager.getSubscription();
-// dev-only logging
-if (import.meta.env.DEV) console.debug("📬 Existing subscription:", existing);
+      console.log("📬 Existing subscription:", existing);
 
-const pushSavedKey = `pushSaved:${currentUser._id}`;
+      if (existing) {
+        console.log("♻️ Reusing existing push subscription");
+        const payload = existing.toJSON ? existing.toJSON() : JSON.parse(JSON.stringify(existing));
+        const res = await api.savePushSubscription(currentUser._id, payload);
 
-// If subscription exists and we've already saved it from this browser, skip saving again
-if (existing) {
-  if (!localStorage.getItem(pushSavedKey)) {
-    const payload = existing.toJSON ? existing.toJSON() : JSON.parse(JSON.stringify(existing));
-    const res = await api.savePushSubscription(currentUser._id, payload);
-    if (res?.success) {
-      localStorage.setItem(pushSavedKey, "1");
-      if (import.meta.env.DEV) console.debug("✅ Existing push subscription saved successfully!");
-    } else {
-      console.error("❌ Failed to save existing subscription:", res);
-    }
-  } else {
-    if (import.meta.env.DEV) console.debug("♻️ Existing push subscription already saved (skipping network save).");
-  }
-  return;
-}
-
+        if (res.success) {
+          console.log("✅ Existing push subscription saved successfully!");
+        } else {
+          console.error("❌ Failed to save existing subscription:", res);
+        }
+        return;
+      }
 
       // ✅ Create new subscription if none exists
       const appServerKey = urlBase64ToUint8Array(vapidKey);
-      
+      console.log("📐 applicationServerKey Uint8Array length:", appServerKey.length);
 
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -403,82 +390,21 @@ useEffect(() => {
 }, []);
 
   // Fetch online users
-  // Replace the old fetchOnlineUsers implementation with this
-const fetchOnlineUsers = async () => {
-  try {
-    const token = localStorage.getItem("userToken");
-    const headers = { Authorization: `Bearer ${token}` };
-
-    // 1) Try cached endpoint first (saves data when server returns 304)
-    const cachedRes = await fetch(`${import.meta.env.VITE_API_URL || ""}/api/users/all-cached`, {
-      method: "GET",
-      headers
-    });
-
-    // If server returns 304 (not modified), browser/service-worker may have the cached body.
-    // But fetch won't give us the cached JSON automatically in a plain fetch() call when response is 304,
-    // so attempt to read body if status 200; if 304, fallback to cached data in localStorage (see below).
-    if (cachedRes.status === 200) {
-      const json = await cachedRes.json();
+  const fetchOnlineUsers = async () => {
+    try {
+      const json = await api.getOnlineUsers();
       if (json?.success) {
         const all = json.users || [];
         const myId = currentUser?._id || localStorage.getItem("userId");
-        const others = all.filter((u) => u._id !== myId);
+        const others = all.filter((u: any) => u._id !== myId);
         setUsers(others);
         setOnlineCount(others.length);
-
-        // store a local copy for 304 fallback (optional)
-        try { localStorage.setItem("cachedUsersBody", JSON.stringify({ users: others, etag: cachedRes.headers.get("ETag") })); } catch(e){}
-        if (import.meta.env.DEV) console.debug("Fetched online users (cached endpoint):", others.length);
-        return;
+        console.log("Fetched online users:", others.length);
       }
+    } catch (err) {
+      console.error("Fetch users error:", err);
     }
-
-    // If cached endpoint gave 304 or non-200, attempt to use already-stored cached body
-    if (cachedRes.status === 304) {
-      // Try to pick up previously saved cached body in localStorage (if service worker didn't hydrate)
-      const saved = localStorage.getItem("cachedUsersBody");
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          const all = parsed.users || [];
-          const myId = currentUser?._id || localStorage.getItem("userId");
-          const others = all.filter((u) => u._id !== myId);
-          setUsers(others);
-          setOnlineCount(others.length);
-          if (import.meta.env.DEV) console.debug("Used saved cached users (304).");
-          return;
-        } catch (e) {
-          if (import.meta.env.DEV) console.warn("Failed to parse saved cached users:", e);
-        }
-      }
-    }
-
-    // 2) Fallback: call the original /all endpoint as before (keeps backward compatibility)
-    const fallbackRes = await fetch(`${import.meta.env.VITE_API_URL || ""}/api/users/all`, {
-      method: "GET",
-      headers
-    });
-    if (fallbackRes.ok) {
-      const json2 = await fallbackRes.json();
-      if (json2?.success) {
-        const all = json2.users || [];
-        const myId = currentUser?._id || localStorage.getItem("userId");
-        const others = all.filter((u) => u._id !== myId);
-        setUsers(others);
-        setOnlineCount(others.length);
-        if (import.meta.env.DEV) console.debug("Fetched online users (fallback /all):", others.length);
-        return;
-      }
-    }
-
-    // If everything fails:
-    if (import.meta.env.DEV) console.warn("Failed to fetch online users from cached and fallback endpoints", { cachedStatus: cachedRes.status });
-  } catch (err) {
-    console.error("Fetch users error:", err);
-  }
-};
-
+  };
 
   // ✅ FIXED: Socket event handling - removed problematic dependency array
   useEffect(() => {
@@ -651,6 +577,7 @@ const onPricingUpdate = (update: any) => {
     return prev;
   });
 
+  console.log("💰 Pricing updated for:", update.userId);
 };
 
 // ✅ NEW: Listen for wallet updates (refunds/earnings) - SEPARATE FUNCTION!
@@ -708,7 +635,10 @@ const onUserNowOnline = (data: any) => {
             online: true,
           };
 
-          
+          console.log(
+            "🔍 Opening pricing from toast (now-online) for:",
+            teacherLike.fullName
+          );
           openPricingForTeacher(teacherLike);
         }}
       >
@@ -734,18 +664,8 @@ const onUserNowOnline = (data: any) => {
     socket.on("user:now-online", onUserNowOnline);
 
     // ✅ NEW: Listen for manual "I'm available" notification
-const onUserNowAvailable = async (data: any) => {
+const onUserNowAvailable = (data: any) => {
   console.log("📞 User is now available (manual notify):", data);
-
-  // ✅ Mark notification as seen when user views the toast
-  if (data.notificationId) {
-    try {
-      await api.dismissWaitingNotification(data.notificationId);
-      console.log("✅ Marked notification as seen:", data.notificationId);
-    } catch (err) {
-      console.error("Error marking notification as seen:", err);
-    }
-  }
 
   toast({
     title: "📞 User is Now Available!",
@@ -755,6 +675,7 @@ const onUserNowAvailable = async (data: any) => {
       <Button
         size="sm"
         onClick={() => {
+          // ✅ Same idea: minimal teacher, let modal logic fetch full details
           const teacherLike = {
             _id: data.userId,
             id: data.userId,
@@ -763,7 +684,10 @@ const onUserNowAvailable = async (data: any) => {
             online: true,
           };
 
-          
+          console.log(
+            "🔍 Opening pricing from toast (now-available) for:",
+            teacherLike.fullName
+          );
           openPricingForTeacher(teacherLike);
         }}
       >
@@ -859,7 +783,7 @@ socket.on("user:now-available", onUserNowAvailable);
 
     // ✅ Mark that user manually toggled
     userManuallyToggled.current = true;
-    
+    console.log("User toggled:", checked);
 
     // ✅ Update local state immediately
     setIsOnline(checked);
@@ -899,6 +823,7 @@ socket.on("user:now-available", onUserNowAvailable);
     // ✅ Reset the ref after a short delay to allow state sync
     setTimeout(() => {
       userManuallyToggled.current = false;
+      console.log("Manual toggle complete, sync re-enabled");
     }, 1000);
   };
 
@@ -940,6 +865,7 @@ socket.on("user:now-available", onUserNowAvailable);
 
   const openPricingForTeacher = async (teacher: any) => {
   try {
+    console.log("🔍 Opening pricing modal for:", teacher.fullName || teacher.name);
     
     // ✅ NEW: Check if user is offline
     if (!teacher.online && teacher.online !== undefined) {
@@ -957,7 +883,11 @@ socket.on("user:now-available", onUserNowAvailable);
     }
 
     // ✅ REST OF EXISTING CODE FOR ONLINE USERS
-    
+    console.log("📊 Current teacher data:", {
+      id: teacher._id,
+      tiers: teacher.pricingTiers,
+      rate: teacher.ratePerMinute
+    });
 
     const freshRes = await api.getOnlineUsers();
     
@@ -970,7 +900,11 @@ socket.on("user:now-available", onUserNowAvailable);
       
       if (found) {
         freshTeacher = found;
-        
+        console.log("✅ Fetched fresh teacher data:", {
+          name: found.fullName,
+          tiers: found.pricingTiers,
+          rate: found.ratePerMinute
+        });
       }
     }
 
@@ -978,6 +912,7 @@ socket.on("user:now-available", onUserNowAvailable);
       ? freshTeacher.pricingTiers
       : [{ minutes: 1, price: freshTeacher?.ratePerMinute || 39 }];
 
+    console.log("💰 Final pricing tiers to display:", pricingTiers);
 
     const safeTeacher = {
       id: freshTeacher._id || freshTeacher.id,
@@ -989,6 +924,7 @@ socket.on("user:now-available", onUserNowAvailable);
       ratePerMinute: freshTeacher.ratePerMinute || pricingTiers[0]?.price || 39
     };
 
+    console.log("🎯 Opening modal with teacher:", safeTeacher);
     
     setSelectedTeacher(safeTeacher);
     setShowPricingModal(true);
@@ -1102,7 +1038,7 @@ socket.on("user:now-available", onUserNowAvailable);
     list.sort((a, b) => (a.ratePerMinute || 0) - (b.ratePerMinute || 0));
   }
 
-  
+  console.log("Filtered users:", list.length, "Sort:", sortBy, "Filter:", filterBy);
   return list;
 }, [users, searchTerm, sortBy, filterBy]);
 
@@ -1328,11 +1264,16 @@ socket.on("user:now-available", onUserNowAvailable);
           {/* Available users */}
           <div className="mb-8">
             <h3 className="text-lg font-semibold mb-4">
-              All Users {/* ({onlineCount})  */}
+              Available Users ({onlineCount})
             </h3>
             <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {filteredUsers.map((u, i) => {
-   
+    console.log("🎨 Rendering card for user:", {
+      name: u.fullName,
+      bio: u.bio,
+      skills: u.skills,
+      hasImage: !!u.profileImage,
+    });
 
     return (
       <TeacherCard

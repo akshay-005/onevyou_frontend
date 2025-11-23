@@ -1,70 +1,8 @@
-import { useCallback, useRef } from "react";
-import { memo } from "react";
-
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Video, Star, IndianRupee, BookOpen, Instagram, Facebook, Youtube, Sparkles } from "lucide-react";
-
-
-
-
-
-// avoid duplicate concurrent prefetches across cards
-const inflightPrefetch = (window as any).__onevyou_inflight_prefetch__ || new Set<string>();
-(window as any).__onevyou_inflight_prefetch__ = inflightPrefetch;
-
-
-
-// ---------- PREFETCH HELPERS ----------
-const PREFETCH_KEY = (id: string) => `teacher_cache_${id}`;
-async function prefetchTeacher(teacherId: string) {
-  try {
-    if (!teacherId || teacherId.length < 6) return; // quick validation
-    const key = PREFETCH_KEY(teacherId);
-
-    // already cached -> skip
-    if (sessionStorage.getItem(key)) return;
-
-    // already inflight -> skip
-    if (inflightPrefetch.has(teacherId)) return;
-    inflightPrefetch.add(teacherId);
-
-    const baseUrl = import.meta.env.VITE_API_URL || "";
-    const res = await fetch(`${baseUrl}/api/users/get?userId=${teacherId}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
-    });
-
-    if (!res.ok) {
-      // If 404, cache a small sentinel so we don't refetch repeatedly
-      if (res.status === 404) {
-        try { sessionStorage.setItem(key, JSON.stringify({ _missing: true, ts: Date.now() })); } catch(e){}
-      }
-      return;
-    }
-
-    const json = await res.json();
-    if (json?.success && json.user) {
-      const small = {
-        _id: json.user._id,
-        name: json.user.fullName || json.user.name,
-        pricingTiers: json.user.pricingTiers || json.user.profile?.pricingTiers || [],
-        expertise: json.user.skills?.[0] || json.user.expertise || "",
-        rating: json.user.profile?.rating || json.user.rating || 4.8,
-      };
-      try { sessionStorage.setItem(key, JSON.stringify(small)); } catch(e) {}
-    }
-  } catch (e) {
-    if (import.meta.env.DEV) console.debug("prefetchTeacher failed", e);
-  } finally {
-    inflightPrefetch.delete(teacherId);
-  }
-}
-
-
-
-
 
 interface TeacherCardProps {
   teacher: {
@@ -111,11 +49,6 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
   const teacherId = teacher._id || teacher.id || "";
   const displayName = teacher.fullName || teacher.name || "User";
   const profileImage = teacher.profileImage || teacher.avatar || "";
-  // inside component
-  const prefetchTimerRef = useRef<number | null>(null);
-
- 
-
   
   // Skills - check array first, then fallback
   const skillsArray = Array.isArray(teacher.skills) ? teacher.skills : (teacher.profile?.skills || []);
@@ -131,44 +64,11 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
   const socialMedia = teacher.socialMedia || teacher.profile?.socialMedia || {};
   
   // Pricing tiers - ensure it's an array
-const pricingTiers = Array.isArray(teacher.pricingTiers)
-  ? teacher.pricingTiers
-  : teacher.profile?.pricingTiers || [
-      { minutes: 1, price: teacher.ratePerMinute || 39 }
-    ];
-
-// ----------------- Stable callbacks (avoid inline closures) -----------------
-const handleMouseEnter = useCallback(() => {
-  if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
-
-  if (prefetchTimerRef.current) window.clearTimeout(prefetchTimerRef.current);
-  prefetchTimerRef.current = window.setTimeout(() => {
-    prefetchTeacher(teacherId).catch(() => {});
-    prefetchTimerRef.current = null;
-  }, 300);
-}, [pricingTiers, teacherId]);
-
-const handleMouseLeave = useCallback(() => {
-  if (prefetchTimerRef.current) {
-    window.clearTimeout(prefetchTimerRef.current);
-    prefetchTimerRef.current = null;
-  }
-}, []);
-
-const handleFocus = useCallback(() => {
-  if ((pricingTiers && pricingTiers.length > 0) || sessionStorage.getItem(PREFETCH_KEY(teacherId))) return;
-  prefetchTeacher(teacherId).catch(() => {});
-}, [pricingTiers, teacherId]);
-
-const handleClickConnect = useCallback(() => {
-  onConnect(teacherId);
-  if (!(pricingTiers && pricingTiers.length > 0) && !sessionStorage.getItem(PREFETCH_KEY(teacherId))) {
-    prefetchTeacher(teacherId).catch(() => {});
-  }
-}, [onConnect, teacherId, pricingTiers]);
-
-
-
+  const pricingTiers = Array.isArray(teacher.pricingTiers)
+    ? teacher.pricingTiers
+    : teacher.profile?.pricingTiers || [
+        { minutes: 1, price: teacher.ratePerMinute || 39 }
+      ];
 
   // Get starting price (minimum price)
   const startingPrice = pricingTiers.length
@@ -209,6 +109,7 @@ const handleClickConnect = useCallback(() => {
     return baseUrls[platform] || "";
   };
 
+  console.log("TeacherCard Debug:", { name: displayName, bio, skills: skillsArray, hasProfileImage: !!profileImage });
 
   return (
     <Card className="group relative overflow-hidden transition-all duration-500 hover:shadow-xl hover:-translate-y-2 bg-card border-border/40 backdrop-blur-sm">
@@ -234,13 +135,10 @@ const handleClickConnect = useCallback(() => {
           <Avatar className="h-12 w-12 ring-2 ring-primary/10 group-hover:ring-primary/20 transition-all flex-shrink-0">
             {profileImage && (
               <AvatarImage 
-  src={profileImage} 
-  alt={displayName}
-  className="object-cover"
-  loading="lazy"
-  decoding="async"
-/>
-
+                src={profileImage} 
+                alt={displayName}
+                className="object-cover"
+              />
             )}
             <AvatarFallback className="bg-gradient-primary text-primary-foreground text-sm font-medium">
               {initials}
@@ -324,25 +222,18 @@ const handleClickConnect = useCallback(() => {
         </div>
 
         {/* Connect Button */}
-{/* Connect Button - debounced prefetch + instant open */}
-<Button
-  className="w-full bg-gradient-primary hover:opacity-90 transition-all duration-300 text-sm font-medium py-2.5 group/btn"
-  size="sm"
-onMouseEnter={handleMouseEnter}
-onMouseLeave={handleMouseLeave}
-onFocus={handleFocus}
-onClick={handleClickConnect}
-
->
-  <Video className="mr-2 h-3.5 w-3.5 group-hover/btn:animate-pulse" />
-  Connect Now
-  <Sparkles className="ml-1.5 h-3 w-3 opacity-60" />
-</Button>
-
-
+        <Button 
+          className="w-full bg-gradient-primary hover:opacity-90 transition-all duration-300 text-sm font-medium py-2.5 group/btn"
+          onClick={() => onConnect(teacherId)}
+          size="sm"
+        >
+          <Video className="mr-2 h-3.5 w-3.5 group-hover/btn:animate-pulse" />
+          Connect Now
+          <Sparkles className="ml-1.5 h-3 w-3 opacity-60" />
+        </Button>
       </CardContent>
     </Card>
   );
 };
 
-export default memo(TeacherCard);
+export default TeacherCard;

@@ -25,11 +25,6 @@ import {
 import api from "@/utils/api";
 import { getUserSession } from "@/utils/storage";
 
-const PREFETCH_KEY = (id: string) => `teacher_cache_${id}`;
-const [liveCount, setLiveCount] = useState<number | null>(null);
-
-
-
 interface PricingModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -59,162 +54,57 @@ const PricingModal = ({
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [sortedTiers, setSortedTiers] = useState<{ minutes: number; price: number }[]>([]);
   const [walletBalance, setWalletBalance] = useState(0); 
-  const [loadingTiers, setLoadingTiers] = useState(false);
-
-
-  useEffect(() => {
-  if (isOpen) {
-    setLiveCount(Math.floor(Math.random() * 20) + 5);
-  } else {
-    setLiveCount(null);
-  }
-}, [isOpen, teacher]);
-
-
 
   // ✅ Load and sort pricing tiers whenever teacher changes
- // ✅ Load and sort pricing tiers whenever teacher changes — merge prefetched cache for instant UI
-useEffect(() => {
-  try {
-    // 1) prefer server-provided teacher.pricingTiers if present
-    let tiers = (teacher?.pricingTiers && Array.isArray(teacher.pricingTiers))
-      ? [...teacher.pricingTiers]
-      : teacher?.profile?.pricingTiers ? [...teacher.profile.pricingTiers] : [{ minutes: 1, price: teacher?.ratePerMinute || 39 }];
-
-    // 2) attempt to merge prefetched cache if it has valid pricing (sessionStorage)
-    try {
-      const tid = (teacher?.id || teacher?._id)?.toString();
-      if (tid) {
-        const cached = sessionStorage.getItem(PREFETCH_KEY(tid));
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed && parsed.pricingTiers && Array.isArray(parsed.pricingTiers) && parsed.pricingTiers.length > 0) {
-            // prefer parsed pricing if current tiers are missing or shorter
-            if (!tiers || tiers.length === 0 || parsed.pricingTiers.length >= tiers.length) {
-              tiers = [...parsed.pricingTiers];
-              if (import.meta.env.DEV) console.debug("Using cached pricingTiers from session for instant UI", tid);
-            }
-          }
-        }
+  useEffect(() => {
+    if (teacher?.pricingTiers && Array.isArray(teacher.pricingTiers)) {
+      const sorted = [...teacher.pricingTiers].sort((a, b) => a.minutes - b.minutes);
+      setSortedTiers(sorted);
+      
+      console.log("💰 PricingModal loaded with tiers:", sorted);
+      
+      // Auto-select first tier (usually 1 minute)
+      if (sorted.length > 0) {
+        setSelectedDuration(sorted[0].minutes);
+        console.log("✅ Auto-selected duration:", sorted[0].minutes);
       }
-    } catch (err) {
-      if (import.meta.env.DEV) console.debug("Failed to merge cached pricing", err);
-    }
-
-    // sort and set synchronously for instant render
-    const sorted = tiers.sort((a, b) => a.minutes - b.minutes);
-    setSortedTiers(sorted);
-
-    if (sorted.length > 0) {
-      setSelectedDuration(prev => prev === null ? sorted[0].minutes : prev);
-      if (import.meta.env.DEV) console.debug("PricingModal loaded with tiers:", sorted);
     } else {
+      console.warn("⚠️ No pricing tiers found, using default");
       setSortedTiers([{ minutes: 1, price: 39 }]);
-      setSelectedDuration(prev => prev === null ? 1 : prev);
-      if (import.meta.env.DEV) console.warn("⚠️ No pricing tiers found, using default");
+      setSelectedDuration(1);
     }
-  } catch (e) {
-    if (import.meta.env.DEV) console.debug("pricing tiers effect error", e);
-  }
-}, [teacher]);
-
+  }, [teacher]);
 
   // ✅ Load user data and wallet balance on mount
-// ✅ Non-blocking: use cached session + background refresh (instant UI)
 useEffect(() => {
-  let cancelled = false;
-
-  const loadInitial = async () => {
+  const loadUser = async () => {
     try {
-      // 1) Try session cached teacher/pricing for instant UI (prefetch from TeacherCard)
-      const tid = (teacher?.id || teacher?._id)?.toString();
-      if (tid) {
-        const cached = sessionStorage.getItem(PREFETCH_KEY(tid));
-        if (cached) {
-          if (import.meta.env.DEV) console.debug("Using prefetched teacher data", tid);
-          // we don't overwrite sortedTiers here to avoid side-effects — sortedTiers is derived from `teacher` prop
-        }
-      }
-    } catch (e) {
-      if (import.meta.env.DEV) console.debug("prefetch read failed", e);
-    }
-
-    // 2) Load current user quickly from session, then fetch fresh in background
-    try {
-      const session = getUserSession?.();
-      if (session?.user) {
-        setCurrentUser(session.user);
+      const { user } = getUserSession();
+      
+      if (user) {
+        setCurrentUser(user);
       } else {
-        api.getMe()
-          .then((res) => { if (!cancelled && res?.success) setCurrentUser(res.user); })
-          .catch(() => {});
-      }
-    } catch (e) {
-      if (import.meta.env.DEV) console.debug("getUserSession failed", e);
-    }
-
-    // 3) Wallet: use sessionStorage first, then fetch in background
-    try {
-      const wb = sessionStorage.getItem("walletBalance");
-      if (wb) setWalletBalance(Number(wb));
-    } catch (e) {}
-
-    (async () => {
-      try {
-        const walletRes = await api.getWalletBalance();
-        if (!cancelled && walletRes?.success) {
-          setWalletBalance(walletRes.wallet.availableBalance);
-          try { sessionStorage.setItem("walletBalance", String(walletRes.wallet.availableBalance)); } catch(e){}
-          if (import.meta.env.DEV) console.debug("Wallet refreshed in background");
+        const response = await api.getMe();
+        if (response?.success && response?.user) {
+          setCurrentUser(response.user);
         }
-      } catch (err) {
-        if (import.meta.env.DEV) console.debug("wallet fetch failed", err);
       }
-    })();
-
-    // 4) Background refresh: fetch fresh teacher/pricing and update session cache
-    if (teacher?.id || teacher?._id) {
-      setLoadingTiers(true);
-      const tid = (teacher.id || teacher._id).toString();
-      (async () => {
-        try {
-          const baseUrl = import.meta.env.VITE_API_URL || "";
-          const res = await fetch(`${baseUrl}/api/users/get?userId=${tid}`, {
-  headers: { Authorization: `Bearer ${localStorage.getItem("userToken")}` },
-});
-
-          if (!res.ok) {
-            setLoadingTiers(false);
-            return;
-          }
-          const json = await res.json();
-          if (json?.success && json.user) {
-            const small = {
-              _id: json.user._id,
-              name: json.user.fullName || json.user.name,
-              pricingTiers: json.user.pricingTiers || json.user.profile?.pricingTiers || [],
-              expertise: json.user.skills?.[0] || json.user.expertise || "",
-              rating: json.user.profile?.rating || json.user.rating || 4.8,
-            };
-            try { sessionStorage.setItem(PREFETCH_KEY(tid), JSON.stringify(small)); } catch(e){}
-            if (!cancelled && import.meta.env.DEV) console.debug("Prefetch cache updated for", tid);
-          }
-        } catch (err) {
-          if (import.meta.env.DEV) console.debug("Error fetching teacher details:", err);
-        } finally {
-          if (!cancelled) setLoadingTiers(false);
-        }
-      })();
+      
+      // ✅ Fetch wallet balance
+      const walletRes = await api.getWalletBalance();
+      if (walletRes.success) {
+        setWalletBalance(walletRes.wallet.availableBalance);
+        console.log("💰 Wallet balance loaded:", walletRes.wallet.availableBalance);
+      }
+    } catch (err) {
+      console.error("❌ Error loading user:", err);
     }
   };
 
-  if (isOpen) loadInitial();
-
-  return () => {
-    cancelled = true;
-  };
-}, [isOpen, teacher]);
-
+  if (isOpen) {
+    loadUser();
+  }
+}, [isOpen]);
 
   // ✅ Get selected tier details
   const getSelectedTier = () => {
@@ -432,8 +322,12 @@ rzp.open();
   // ✅ Check if button should be enabled
   const isButtonEnabled = selectedDuration !== null && paymentMethod !== "";
   
-  if (import.meta.env.DEV) console.debug("🔘 Button state:", { isButtonEnabled, selectedDuration, paymentMethod });
-  
+  console.log("🔘 Button state:", { 
+    isButtonEnabled, 
+    selectedDuration, 
+    paymentMethod 
+  });
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
@@ -489,9 +383,8 @@ rzp.open();
           <div className="bg-gradient-to-r from-primary/10 to-accent/10 rounded-lg p-2.5 flex items-center gap-2 mb-4">
             <Sparkles className="h-4 w-4 text-primary animate-pulse flex-shrink-0" />
             <p className="text-xs font-medium">
-  🔥 {liveCount ?? "—"} students learning with {teacher.name} right now!
-</p>
-
+              🔥 {Math.floor(Math.random() * 20) + 5} students learning with {teacher.name} right now!
+            </p>
           </div>
 
           {/* Duration Selection - Compact */}
