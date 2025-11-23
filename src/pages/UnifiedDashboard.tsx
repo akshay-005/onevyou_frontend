@@ -101,6 +101,7 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     const [searchTerm, setSearchTerm] = useState("");
     const [users, setUsers] = useState<any[]>([]);
+    const [visibleCount, setVisibleCount] = useState(12); // Add this line
     //const [incomingCall, setIncomingCall] = useState<any | null>(null);
     //const [showIncoming, setShowIncoming] = useState(false);
     const [currentUser, setCurrentUser] = useState<any | null>(null);
@@ -1275,7 +1276,7 @@ socket.on("user:now-available", onUserNowAvailable);
     {isPending && <span className="text-sm text-muted-foreground ml-2">(Loading...)</span>}
   </h3>
   <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-    {filteredUsers.slice(0, 12).map((u, i) => ( // ✅ Only render first 12 initially
+    {filteredUsers.slice(0, visibleCount).map((u, i) => ( // ✅ Only render first 12 initially
       <TeacherCard
         key={u._id || i}
         teacher={{
@@ -1311,20 +1312,16 @@ socket.on("user:now-available", onUserNowAvailable);
   </div>
   
   {/* Load More Button */}
-  {filteredUsers.length > 12 && (
-    <div className="text-center mt-6">
-      <Button
-        variant="outline"
-        onClick={() => {
-          // Render all remaining cards
-          const remaining = filteredUsers.slice(12);
-          // This will be handled by React's state batching
-        }}
-      >
-        Load More ({filteredUsers.length - 12} more)
-      </Button>
-    </div>
-  )}
+  {filteredUsers.length > visibleCount && (
+  <div className="text-center mt-6">
+    <Button
+      variant="outline"
+      onClick={() => setVisibleCount(prev => prev + 12)}
+    >
+      Load More ({filteredUsers.length - visibleCount} more)
+    </Button>
+  </div>
+)}
 </div>
         </main>
 
