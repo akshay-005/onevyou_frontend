@@ -1,5 +1,4 @@
  // frontend/src/pages/UnifiedDashboard.tsx
-  import { useCallback, useTransition } from "react"; // Add to existing React imports
   import React, { useEffect, useState, useMemo, useRef } from "react";
   import { useNavigate } from "react-router-dom";
   import {
@@ -11,7 +10,6 @@
   import { Input } from "@/components/ui/input";
   import { Switch } from "@/components/ui/switch";
   import { Label } from "@/components/ui/label";
-  import { Card } from "@/components/ui/card";
   import {
     Search,
     Bell,
@@ -102,8 +100,6 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     const [searchTerm, setSearchTerm] = useState("");
     const [users, setUsers] = useState<any[]>([]);
-    const [isLoadingUsers, setIsLoadingUsers] = useState(true);
-    const [visibleCount, setVisibleCount] = useState(12); // Add this line
     //const [incomingCall, setIncomingCall] = useState<any | null>(null);
     //const [showIncoming, setShowIncoming] = useState(false);
     const [currentUser, setCurrentUser] = useState<any | null>(null);
@@ -150,41 +146,41 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     
 
   // ✅ FIXED: Load current user - only set toggle state once on initial load
- // ✅ FIXED: Aggressive prefetching - load users FIRST, then user data
   useEffect(() => {
     let mounted = true;
-    
-    // 🚀 STEP 1: Fetch users IMMEDIATELY (no waiting for currentUser)
-    console.log("🚀 Prefetching users on mount...");
-    fetchOnlineUsers();
-    
-    // 🚀 STEP 2: Then load current user in parallel
     api
       .getMe()
-      .then((res) => {
-        if (!mounted) return;
-        if (res?.success) {
-          setCurrentUser(res.user);
+        .then((res) => {
+    if (!mounted) return;
+    if (res?.success) {
+      setCurrentUser(res.user);
 
-          if (!userManuallyToggled.current && !initialLoadComplete.current) {
-            const saved = localStorage.getItem("isOnline");
-            const restored = saved === "true";
-            const finalState = restored ? true : false;
-            console.log("Initial load: forcing isOnline =", finalState);
-            setIsOnline(finalState);
-            initialLoadComplete.current = true;
-          }
-        }
-      })
+      if (!userManuallyToggled.current && !initialLoadComplete.current) {
+        const saved = localStorage.getItem("isOnline");
+        const restored = saved === "true";
+        const finalState = restored ? true : false;
+        console.log("Initial load: forcing isOnline =", finalState);
+        setIsOnline(finalState);
+        initialLoadComplete.current = true;
+      }
+
+      // ✅ NEW: Always fetch online users once after login (even if user is offline)
+      setTimeout(() => {
+        console.log("🔄 Initial fetch of online users after login");
+        fetchOnlineUsers();
+      }, 500);
+    }
+  })
+
       .catch((err) => {
         console.error("getMe error:", err);
         initialLoadComplete.current = true;
       });
-    
     return () => {
       mounted = false;
     };
   }, []);
+
 
 
   // --- Web Push Subscription Setup ---
@@ -393,32 +389,22 @@ useEffect(() => {
   return () => window.removeEventListener('notification-dismissed', handleNotificationDismissed);
 }, []);
 
-  /// Fetch online users with debouncing
-const [isPending, startTransition] = useTransition();
-const fetchOnlineUsers = useCallback(async () => {
-  try {
-    setIsLoadingUsers(true); // ✅ Show loading
-    const json = await api.getOnlineUsers();
-    if (json?.success) {
-      const all = json.users || [];
-      const myId = currentUser?._id || localStorage.getItem("userId");
-      const others = all.filter((u: any) => u._id !== myId);
-      
-      startTransition(() => {
+  // Fetch online users
+  const fetchOnlineUsers = async () => {
+    try {
+      const json = await api.getOnlineUsers();
+      if (json?.success) {
+        const all = json.users || [];
+        const myId = currentUser?._id || localStorage.getItem("userId");
+        const others = all.filter((u: any) => u._id !== myId);
         setUsers(others);
         setOnlineCount(others.length);
-        setIsLoadingUsers(false); // ✅ Hide loading
-      });
-      
-      console.log("Fetched online users:", others.length);
-    } else {
-      setIsLoadingUsers(false);
+        console.log("Fetched online users:", others.length);
+      }
+    } catch (err) {
+      console.error("Fetch users error:", err);
     }
-  } catch (err) {
-    console.error("Fetch users error:", err);
-    setIsLoadingUsers(false);
-  }
-}, [currentUser?._id]);
+  };
 
   // ✅ FIXED: Socket event handling - removed problematic dependency array
   useEffect(() => {
@@ -430,20 +416,18 @@ const fetchOnlineUsers = useCallback(async () => {
     console.log("Setting up socket listeners");
 
     const onConnect = () => {
-  console.log("Socket connected:", socket.id);
-  
-  // ✅ Only fetch if we don't already have users
-  if (users.length === 0) {
-    fetchOnlineUsers();
-  }
-  
-  const savedStatus = localStorage.getItem("isOnline") === "true";
-  socket.emit("user:status:update", {
-    userId: currentUser?._id || localStorage.getItem("userId"),
-    isOnline: savedStatus,
-  });
-  console.log("🔄 Restored online status from localStorage:", savedStatus);
-};
+      console.log("Socket connected:", socket.id);
+      // ✅ ALWAYS fetch users when socket connects (don't check initialLoadComplete)
+      fetchOnlineUsers();
+        // ✅ Re-sync last known online status when reconnecting
+    const savedStatus = localStorage.getItem("isOnline") === "true";
+    socket.emit("user:status:update", {
+      userId: currentUser?._id || localStorage.getItem("userId"),
+      isOnline: savedStatus,
+    });
+    console.log("🔄 Restored online status from localStorage:", savedStatus);
+
+    };
 
   const onUserStatus = async (update: any) => {
   const myUserId = currentUser?._id || localStorage.getItem("userId");
@@ -1277,47 +1261,36 @@ socket.on("user:now-available", onUserNowAvailable);
             </div>
           </div>
 
-          {/* Available users with lazy loading */}
-<div className="mb-8">
-  <h3 className="text-lg font-semibold mb-4">
-    Available Users ({onlineCount})
-    {isPending && <span className="text-sm text-muted-foreground ml-2">(Loading...)</span>}
-  </h3>
-  <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-  {isLoadingUsers ? (
-    Array.from({ length: 8 }).map((_, i) => (
-      <Card key={`skeleton-${i}`} className="p-5 space-y-4 animate-pulse">
-        <div className="flex items-start gap-3">
-          <div className="h-12 w-12 rounded-full bg-muted" />
-          <div className="flex-1 space-y-2">
-            <div className="h-4 bg-muted rounded w-3/4" />
-            <div className="h-3 bg-muted rounded w-1/2" />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <div className="h-3 bg-muted rounded" />
-          <div className="h-3 bg-muted rounded w-5/6" />
-        </div>
-        <div className="h-10 bg-muted rounded" />
-      </Card>
-    ))
-  ) : (
-    filteredUsers.slice(0, visibleCount).map((u, i) => (
+          {/* Available users */}
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold mb-4">
+              Available Users ({onlineCount})
+            </h3>
+            <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              {filteredUsers.map((u, i) => {
+    console.log("🎨 Rendering card for user:", {
+      name: u.fullName,
+      bio: u.bio,
+      skills: u.skills,
+      hasImage: !!u.profileImage,
+    });
+
+    return (
       <TeacherCard
         key={u._id || i}
         teacher={{
           _id: u._id,
-          id: u._id,
+          id: u._id, // Both _id and id for compatibility
           fullName: u.fullName,
           name: u.fullName || u.profile?.name || u.phoneNumber || "User",
-          profileImage: u.profileImage,
-          bio: u.bio,
-          skills: u.skills,
-          expertise: u.skills?.[0] || "Skill not specified",
+          profileImage: u.profileImage, // Direct from API
+          bio: u.bio, // Direct from API
+          skills: u.skills, // Direct from API (array)
+          expertise: u.skills?.[0] || "Skill not specified", // First skill
           rating: u.profile?.rating || 4.8,
           isOnline: u.online,
           online: u.online,
-          socialMedia: u.socialMedia,
+          socialMedia: u.socialMedia, // Direct from API
           pricingTiers: Array.isArray(u.pricingTiers)
             ? u.pricingTiers
             : [
@@ -1326,30 +1299,20 @@ socket.on("user:now-available", onUserNowAvailable);
               ],
           ratePerMinute: u.ratePerMinute || 39,
         }}
-        onConnect={() => handleConnect(u._id, u.ratePerMinute || 39, u)}
+        onConnect={() =>
+          handleConnect(u._id, u.ratePerMinute || 39, u)
+        }
       />
-    ))
-  )}
+    );
+  })}
 
-  {!isLoadingUsers && filteredUsers.length === 0 && (
-    <div className="col-span-full text-center text-muted-foreground py-12">
-      <p className="text-lg">No users found</p>
-      <p className="text-sm mt-2">Try adjusting your search or filters</p>
-    </div>
-  )}
-</div>
-
-{!isLoadingUsers && filteredUsers.length > visibleCount && (
-  <div className="text-center mt-6">
-    <Button
-      variant="outline"
-      onClick={() => setVisibleCount(prev => prev + 12)}
-    >
-      Load More ({filteredUsers.length - visibleCount} more)
-    </Button>
-  </div>
-)}
-</div>
+              {filteredUsers.length === 0 && (
+                <div className="text-muted-foreground">
+                  No users online right now.
+                </div>
+              )}
+            </div>
+          </div>
         </main>
 
         
