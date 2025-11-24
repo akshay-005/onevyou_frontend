@@ -1,3 +1,4 @@
+import React, { memo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +45,7 @@ interface TeacherCardProps {
   onConnect: (teacherId: string) => void;
 }
 
-const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
+const TeacherCard = memo(({ teacher, onConnect }: TeacherCardProps) => {
   // Extract data with fallbacks - handle multiple data structure formats
   const teacherId = teacher._id || teacher.id || "";
   const displayName = teacher.fullName || teacher.name || "User";
@@ -72,10 +73,9 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
 
   // Get starting price (minimum price)
   const startingPrice = pricingTiers.length
-  ? Math.min(...pricingTiers.map(tier => tier.price || 0))
-  : teacher.ratePerMinute || 39;
+    ? Math.min(...pricingTiers.map(tier => tier.price || 0))
+    : teacher.ratePerMinute || 39;
 
-  
   // Get initials for avatar fallback
   const initials = displayName
     .split(' ')
@@ -91,9 +91,8 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
     // If it's already a full URL, fix typos and return
     if (username.startsWith("http")) {
       let url = username;
-      // Fix common typos
-      url = url.replace("intagram.com", "instagram.com"); // typo fix
-      url = url.replace("youtube.com/@", "youtube.com/@"); // ensure correct format
+      url = url.replace("intagram.com", "instagram.com");
+      url = url.replace("youtube.com/@", "youtube.com/@");
       return url;
     }
     
@@ -108,8 +107,6 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
     
     return baseUrls[platform] || "";
   };
-
-  console.log("TeacherCard Debug:", { name: displayName, bio, skills: skillsArray, hasProfileImage: !!profileImage });
 
   return (
     <Card className="group relative overflow-hidden transition-all duration-500 hover:shadow-xl hover:-translate-y-2 bg-card border-border/40 backdrop-blur-sm">
@@ -138,6 +135,7 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
                 src={profileImage} 
                 alt={displayName}
                 className="object-cover"
+                loading="lazy"
               />
             )}
             <AvatarFallback className="bg-gradient-primary text-primary-foreground text-sm font-medium">
@@ -234,6 +232,16 @@ const TeacherCard = ({ teacher, onConnect }: TeacherCardProps) => {
       </CardContent>
     </Card>
   );
-};
+}, (prevProps, nextProps) => {
+  // Custom comparison function - only re-render if these properties change
+  return (
+    prevProps.teacher._id === nextProps.teacher._id &&
+    prevProps.teacher.online === nextProps.teacher.online &&
+    prevProps.teacher.rating === nextProps.teacher.rating &&
+    JSON.stringify(prevProps.teacher.pricingTiers) === JSON.stringify(nextProps.teacher.pricingTiers)
+  );
+});
+
+TeacherCard.displayName = "TeacherCard";
 
 export default TeacherCard;
