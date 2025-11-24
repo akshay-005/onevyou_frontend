@@ -56,13 +56,11 @@ function clearCache(pattern?: string) {
   console.log(`🗑️ Cache cleared: ${pattern}`);
 }
 
-// ✅ Get Authorization headers
+// ✅ Get Authorization headers (Cache-Control removed - not needed in requests)
 function getAuthHeaders() {
   const token = localStorage.getItem("userToken");
   const headers: Record<string, string> = { 
-    "Content-Type": "application/json",
-    // ✅ Add cache-control hints
-    "Cache-Control": "max-age=30"
+    "Content-Type": "application/json"
   };
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
