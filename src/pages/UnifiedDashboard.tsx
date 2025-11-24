@@ -187,17 +187,18 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 useEffect(() => {
   if (!currentUser?._id) return;
 
-  // ✅ Ask for permission once when user logs in
+  // ✅ ADD THIS: Request permission immediately when user logs in
   const requestPushPermission = async () => {
-    if (!("Notification" in window)) {
+    if (!('Notification' in window)) {
       console.log("⚠️ Notifications not supported");
       return;
     }
 
+     // Show permission dialog
     if (Notification.permission === "default") {
       const permission = await Notification.requestPermission();
       console.log("🔔 Notification permission:", permission);
-
+      
       if (permission === "granted") {
         toast({
           title: "🔔 Notifications Enabled",
@@ -207,17 +208,14 @@ useEffect(() => {
     }
   };
 
+   // Request permission first
   requestPushPermission();
 
-  // ✅ SAFE: Convert base64 URL key to Uint8Array with padding
   const urlBase64ToUint8Array = (base64String: string) => {
-    base64String = base64String.trim();
-
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)
       .replace(/-/g, "+")
       .replace(/_/g, "/");
-
     const rawData = window.atob(base64);
     const outputArray = new Uint8Array(rawData.length);
     for (let i = 0; i < rawData.length; ++i) {
@@ -228,81 +226,50 @@ useEffect(() => {
 
   const subscribeToPush = async () => {
     try {
-      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      // Check if service worker and push are supported
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         console.log("⚠️ Push notifications not supported in this browser");
         return;
       }
 
+      // ✅ FIXED: Check if VAPID key exists
       const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-      console.log("🔑 VAPID key from env:", vapidKey, "length:", vapidKey?.length);
-
       if (!vapidKey) {
         console.warn("⚠️ VAPID public key not configured");
         return;
       }
 
       const registration = await navigator.serviceWorker.ready;
-      console.log("👷 SW ready:", registration);
 
-      // Permissions
       if (Notification.permission === "default") {
-        const permission = await Notification.requestPermission();
-        console.log("🔔 Notification permission:", permission);
-        if (permission !== "granted") {
-          console.warn("🔕 Push permission not granted");
-          return;
-        }
-      } else if (Notification.permission === "denied") {
-        console.warn("🔕 Notifications denied by user");
+        await Notification.requestPermission();
+      }
+      
+      if (Notification.permission !== "granted") {
+        console.warn("🔕 Push permission not granted");
         return;
       }
-
-      // ✅ Check existing subscription first
-      let existing = await registration.pushManager.getSubscription();
-      console.log("📬 Existing subscription:", existing);
-
-      if (existing) {
-        console.log("♻️ Reusing existing push subscription");
-        const payload = existing.toJSON ? existing.toJSON() : JSON.parse(JSON.stringify(existing));
-        const res = await api.savePushSubscription(currentUser._id, payload);
-
-        if (res.success) {
-          console.log("✅ Existing push subscription saved successfully!");
-        } else {
-          console.error("❌ Failed to save existing subscription:", res);
-        }
-        return;
-      }
-
-      // ✅ Create new subscription if none exists
-      const appServerKey = urlBase64ToUint8Array(vapidKey);
-      console.log("📐 applicationServerKey Uint8Array length:", appServerKey.length);
 
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: appServerKey,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
       });
 
-      console.log("✅ New push subscription created:", subscription);
-
-      const payload = subscription.toJSON ? subscription.toJSON() : JSON.parse(JSON.stringify(subscription));
-      const res = await api.savePushSubscription(currentUser._id, payload);
-
-
+      // ✅ FIXED: Use proper API call
+      const res = await api.savePushSubscription(currentUser._id, subscription);
+      
       if (res.success) {
         console.log("✅ Push subscription saved successfully!");
       } else {
         console.error("❌ Failed to save push subscription:", res);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("❌ Push subscription failed:", err);
-      console.log("❌ Error name:", err?.name, "message:", err?.message);
     }
   };
 
   subscribeToPush();
 }, [currentUser]);
-
 
 
 
@@ -605,19 +572,16 @@ const onWalletUpdated = (data: any) => {
 
 const onUserNowOnline = (data: any) => {
   console.log("🎉 User came online event received:", data);
-
-  // ✅ Avoid duplicate toasts for same user in this session
+  
+  // ✅ Check if we already notified about this user in this session
   if (notifiedUsers.has(data.userId)) {
     console.log("⏭️ Already notified about this user, skipping");
     return;
   }
-
-  setNotifiedUsers((prev) => {
-    const next = new Set(prev);
-    next.add(data.userId);
-    return next;
-  });
-
+  
+  // ✅ Mark as notified
+  setNotifiedUsers(prev => new Set(prev).add(data.userId));
+  
   toast({
     title: "🎉 User is Now Online!",
     description: `${data.userName} just came online. Connect now!`,
@@ -626,28 +590,19 @@ const onUserNowOnline = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
-          // ✅ Build a minimal teacher object and let openPricingForTeacher fetch full data
-          const teacherLike = {
-            _id: data.userId,
-            id: data.userId,
-            fullName: data.userName,
-            name: data.userName,
-            online: true,
-          };
-
-          console.log(
-            "🔍 Opening pricing from toast (now-online) for:",
-            teacherLike.fullName
-          );
-          openPricingForTeacher(teacherLike);
+          // Find the user and open pricing modal
+          const user = users.find(u => u._id === data.userId);
+          if (user) {
+            openPricingForTeacher(user);
+          }
         }}
       >
         Connect
       </Button>
     ),
   });
-
-  // Just refresh list in background
+  
+  // Refresh users list to show them as online
   fetchOnlineUsers();
 };
 
@@ -666,7 +621,7 @@ const onUserNowOnline = (data: any) => {
     // ✅ NEW: Listen for manual "I'm available" notification
 const onUserNowAvailable = (data: any) => {
   console.log("📞 User is now available (manual notify):", data);
-
+  
   toast({
     title: "📞 User is Now Available!",
     description: `${data.userName} is online and ready to connect!`,
@@ -675,30 +630,24 @@ const onUserNowAvailable = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
-          // ✅ Same idea: minimal teacher, let modal logic fetch full details
-          const teacherLike = {
-            _id: data.userId,
-            id: data.userId,
-            fullName: data.userName,
-            name: data.userName,
-            online: true,
-          };
-
-          console.log(
-            "🔍 Opening pricing from toast (now-available) for:",
-            teacherLike.fullName
-          );
-          openPricingForTeacher(teacherLike);
+          const user = users.find(u => u._id === data.userId);
+          if (user) {
+            openPricingForTeacher(user);
+          } else {
+            fetchOnlineUsers().then(() => {
+              const freshUser = users.find(u => u._id === data.userId);
+              if (freshUser) openPricingForTeacher(freshUser);
+            });
+          }
         }}
       >
         Connect Now
       </Button>
     ),
   });
-
+  
   fetchOnlineUsers();
 };
-
 
 // Register the listener
 socket.on("user:now-available", onUserNowAvailable);
