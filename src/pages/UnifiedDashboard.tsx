@@ -72,6 +72,41 @@
     Linkedin,
   } from "lucide-react";
 
+  // ✅ Clean localStorage on mount (one-time)
+const cleanLocalStorage = () => {
+  try {
+    const keep = ["userToken", "userId", "isOnline", "cachedUsers"];
+    const remove: string[] = [];
+    
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && !keep.includes(key)) {
+        // Remove debug, temp, old data
+        if (
+          key.includes("debug") ||
+          key.includes("temp") ||
+          key.includes("cache") && key !== "cachedUsers" ||
+          key.startsWith("loglevel") ||
+          key.startsWith("ally-")
+        ) {
+          remove.push(key);
+        }
+      }
+    }
+    
+    remove.forEach(k => localStorage.removeItem(k));
+    
+    if (remove.length > 0) {
+      console.log("🧹 Cleaned", remove.length, "old localStorage items");
+    }
+  } catch (err) {
+    console.warn("Storage cleanup failed:", err);
+  }
+};
+
+// Run cleanup once
+cleanLocalStorage();
+
   const UnifiedDashboard: React.FC = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -408,6 +443,7 @@ useEffect(() => {
 }, []);
 
   // Fetch online users with caching
+/// Fetch online users with COMPRESSED caching
 const [isPending, startTransition] = useTransition();
 const fetchOnlineUsers = useCallback(async () => {
   try {
@@ -424,12 +460,65 @@ const fetchOnlineUsers = useCallback(async () => {
         setOnlineCount(others.length);
         setIsLoadingUsers(false);
         
-        // 💾 Cache users for next load (instant display)
+        // 💾 Cache with compression (store only essential fields)
         try {
-          localStorage.setItem("cachedUsers", JSON.stringify(others));
-          console.log("💾 Cached", others.length, "users for next visit");
-        } catch (err) {
-          console.warn("Failed to cache users:", err);
+          // ✅ Store ONLY essential fields to save space
+          const compressed = others.map(u => ({
+            _id: u._id,
+            fullName: u.fullName,
+            profileImage: u.profileImage,
+            bio: u.bio?.slice(0, 100), // Truncate bio to 100 chars
+            skills: u.skills?.slice(0, 3), // Max 3 skills
+            socialMedia: u.socialMedia,
+            ratePerMinute: u.ratePerMinute,
+            pricingTiers: u.pricingTiers,
+            online: u.online,
+            rating: u.rating
+          }));
+          
+          localStorage.setItem("cachedUsers", JSON.stringify(compressed));
+          console.log("💾 Cached", compressed.length, "users (compressed)");
+        } catch (cacheErr: any) {
+          console.warn("Cache write failed:", cacheErr.message);
+          
+          // ✅ If quota exceeded, clear old cache and retry
+          if (cacheErr.name === "QuotaExceededError") {
+            console.log("🧹 Cleaning localStorage...");
+            
+            // Remove old/large items
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key && (
+                key.includes("debug") || 
+                key.includes("temp") ||
+                key.includes("old") ||
+                key.startsWith("loglevel")
+              )) {
+                keysToRemove.push(key);
+              }
+            }
+            
+            keysToRemove.forEach(k => localStorage.removeItem(k));
+            console.log("🗑️ Removed", keysToRemove.length, "old items");
+            
+            // Retry with minimal data
+            try {
+              const minimal = others.map(u => ({
+                _id: u._id,
+                fullName: u.fullName,
+                profileImage: u.profileImage,
+                skills: u.skills?.[0],
+                ratePerMinute: u.ratePerMinute,
+                online: u.online
+              }));
+              
+              localStorage.setItem("cachedUsers", JSON.stringify(minimal));
+              console.log("✅ Cached minimal user data");
+            } catch (retryErr) {
+              console.error("❌ Cache still failed - localStorage full");
+            }
+          }
         }
       });
       
