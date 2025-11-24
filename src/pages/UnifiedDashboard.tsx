@@ -101,7 +101,20 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
 
     const [searchTerm, setSearchTerm] = useState("");
-    const [users, setUsers] = useState<any[]>([]);
+    // ✅ NEW: Initialize with cached users for instant display
+const [users, setUsers] = useState<any[]>(() => {
+  try {
+    const cached = localStorage.getItem("cachedUsers");
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      console.log("♻️ Loaded", parsed.length, "users from cache (instant display)");
+      return parsed;
+    }
+  } catch (err) {
+    console.warn("Failed to load cached users:", err);
+  }
+  return [];
+});
     const [isLoadingUsers, setIsLoadingUsers] = useState(true);
     const [visibleCount, setVisibleCount] = useState(12); // Add this line
     //const [incomingCall, setIncomingCall] = useState<any | null>(null);
@@ -150,37 +163,41 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     
 
   // ✅ FIXED: Load current user - only set toggle state once on initial load
-  useEffect(() => {
+ // ✅ AGGRESSIVE PREFETCH: Load users IMMEDIATELY on mount
+useEffect(() => {
   let mounted = true;
   
-  // ✅ Fetch users IMMEDIATELY (don't wait)
+  // 🚀 STEP 1: Start fetching users IMMEDIATELY (don't wait for anything)
+  console.log("🚀 [MOUNT] Prefetching users immediately...");
   fetchOnlineUsers();
   
+  // 🚀 STEP 2: Load current user in PARALLEL (not blocking users)
   api
     .getMe()
-      .then((res) => {
-    if (!mounted) return;
-    if (res?.success) {
-      setCurrentUser(res.user);
+    .then((res) => {
+      if (!mounted) return;
+      if (res?.success) {
+        setCurrentUser(res.user);
 
-      if (!userManuallyToggled.current && !initialLoadComplete.current) {
-        const saved = localStorage.getItem("isOnline");
-        const restored = saved === "true";
-        const finalState = restored ? true : false;
-        console.log("Initial load: forcing isOnline =", finalState);
-        setIsOnline(finalState);
-        initialLoadComplete.current = true;
+        // Only set online state once
+        if (!userManuallyToggled.current && !initialLoadComplete.current) {
+          const saved = localStorage.getItem("isOnline");
+          const restored = saved === "true";
+          console.log("Initial load: forcing isOnline =", restored);
+          setIsOnline(restored);
+          initialLoadComplete.current = true;
+        }
       }
-    }
-  })
-      .catch((err) => {
-        console.error("getMe error:", err);
-        initialLoadComplete.current = true;
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    })
+    .catch((err) => {
+      console.error("getMe error:", err);
+      initialLoadComplete.current = true;
+    });
+  
+  return () => {
+    mounted = false;
+  };
+}, []); // ✅ Empty deps - run only ONCE on mount
 
 
 
@@ -390,12 +407,13 @@ useEffect(() => {
   return () => window.removeEventListener('notification-dismissed', handleNotificationDismissed);
 }, []);
 
-  /// Fetch online users with debouncing
+  // Fetch online users with caching
 const [isPending, startTransition] = useTransition();
 const fetchOnlineUsers = useCallback(async () => {
   try {
-    setIsLoadingUsers(true); // ✅ Show loading
+    setIsLoadingUsers(true);
     const json = await api.getOnlineUsers();
+    
     if (json?.success) {
       const all = json.users || [];
       const myId = currentUser?._id || localStorage.getItem("userId");
@@ -404,10 +422,18 @@ const fetchOnlineUsers = useCallback(async () => {
       startTransition(() => {
         setUsers(others);
         setOnlineCount(others.length);
-        setIsLoadingUsers(false); // ✅ Hide loading
+        setIsLoadingUsers(false);
+        
+        // 💾 Cache users for next load (instant display)
+        try {
+          localStorage.setItem("cachedUsers", JSON.stringify(others));
+          console.log("💾 Cached", others.length, "users for next visit");
+        } catch (err) {
+          console.warn("Failed to cache users:", err);
+        }
       });
       
-      console.log("Fetched online users:", others.length);
+      console.log("✅ Fetched online users:", others.length);
     } else {
       setIsLoadingUsers(false);
     }
@@ -426,20 +452,17 @@ const fetchOnlineUsers = useCallback(async () => {
 
     console.log("Setting up socket listeners");
 
-    const onConnect = () => {
-  console.log("Socket connected:", socket.id);
+   const onConnect = () => {
+  console.log("✅ Socket connected:", socket.id);
   
-  // ✅ Only fetch if we don't already have users
-  if (users.length === 0) {
-    fetchOnlineUsers();
-  }
-  
+  // ✅ DON'T fetch users again - we already have them from mount
+  // Only sync online status
   const savedStatus = localStorage.getItem("isOnline") === "true";
   socket.emit("user:status:update", {
     userId: currentUser?._id || localStorage.getItem("userId"),
     isOnline: savedStatus,
   });
-  console.log("🔄 Restored online status from localStorage:", savedStatus);
+  console.log("🔄 Restored online status:", savedStatus);
 };
 
   const onUserStatus = async (update: any) => {
