@@ -758,6 +758,14 @@ socket.on("user:now-available", onUserNowAvailable);
   }, [isOnline]);
 
 
+  // FORCE REFRESH USERS ON MOUNT - CRITICAL FIX
+useEffect(() => {
+  console.log("🔥 Forcing user list refresh...");
+  api.invalidateCache(); // clears frontend cache
+  fetchOnlineUsers();     // your existing function
+}, []);
+
+
   // ✅ FIXED: Toggle with immediate socket emit
   const handleOnlineToggle = (checked: boolean) => {
     if (!socket) {

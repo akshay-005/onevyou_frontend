@@ -13,10 +13,10 @@ const cache = new Map<string, CacheEntry>();
 
 // ✅ REDUCED cache durations for faster updates
 const CACHE_DURATION = {
-  users: 15000,      // 15 seconds (reduced from 30s)
-  profile: 60000,    // 1 minute (reduced from 5m)
-  pricing: 30000,    // 30 seconds
-  wallet: 10000,     // 10 seconds
+  users: 10000,      // 15 seconds (reduced from 30s)
+  profile: 30000,    // 1 minute (reduced from 5m)
+  pricing: 20000,    // 30 seconds
+  wallet: 8000,     // 10 seconds
 };
 
 function getCached(key: string): any | null {
