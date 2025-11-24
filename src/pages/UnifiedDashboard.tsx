@@ -150,38 +150,41 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     
 
   // ✅ FIXED: Load current user - only set toggle state once on initial load
+ // ✅ FIXED: Aggressive prefetching - load users FIRST, then user data
   useEffect(() => {
-  let mounted = true;
-  
-  // ✅ Fetch users IMMEDIATELY (don't wait)
-  fetchOnlineUsers();
-  
-  api
-    .getMe()
+    let mounted = true;
+    
+    // 🚀 STEP 1: Fetch users IMMEDIATELY (no waiting for currentUser)
+    console.log("🚀 Prefetching users on mount...");
+    fetchOnlineUsers();
+    
+    // 🚀 STEP 2: Then load current user in parallel
+    api
+      .getMe()
       .then((res) => {
-    if (!mounted) return;
-    if (res?.success) {
-      setCurrentUser(res.user);
+        if (!mounted) return;
+        if (res?.success) {
+          setCurrentUser(res.user);
 
-      if (!userManuallyToggled.current && !initialLoadComplete.current) {
-        const saved = localStorage.getItem("isOnline");
-        const restored = saved === "true";
-        const finalState = restored ? true : false;
-        console.log("Initial load: forcing isOnline =", finalState);
-        setIsOnline(finalState);
-        initialLoadComplete.current = true;
-      }
-    }
-  })
+          if (!userManuallyToggled.current && !initialLoadComplete.current) {
+            const saved = localStorage.getItem("isOnline");
+            const restored = saved === "true";
+            const finalState = restored ? true : false;
+            console.log("Initial load: forcing isOnline =", finalState);
+            setIsOnline(finalState);
+            initialLoadComplete.current = true;
+          }
+        }
+      })
       .catch((err) => {
         console.error("getMe error:", err);
         initialLoadComplete.current = true;
       });
+    
     return () => {
       mounted = false;
     };
   }, []);
-
 
 
   // --- Web Push Subscription Setup ---
