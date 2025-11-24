@@ -137,16 +137,18 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     const [searchTerm, setSearchTerm] = useState("");
     // ✅ NEW: Initialize with cached users for instant display
+// ✅ NEW: Use sessionStorage instead of localStorage (larger quota)
 const [users, setUsers] = useState<any[]>(() => {
   try {
-    const cached = localStorage.getItem("cachedUsers");
+    // Try sessionStorage first (5-10MB vs 5MB localStorage)
+    const cached = sessionStorage.getItem("cachedUsers");
     if (cached) {
       const parsed = JSON.parse(cached);
-      console.log("♻️ Loaded", parsed.length, "users from cache (instant display)");
+      console.log("♻️ Loaded", parsed.length, "users from session cache");
       return parsed;
     }
   } catch (err) {
-    console.warn("Failed to load cached users:", err);
+    console.warn("Session cache load failed:", err);
   }
   return [];
 });
@@ -442,12 +444,13 @@ useEffect(() => {
   return () => window.removeEventListener('notification-dismissed', handleNotificationDismissed);
 }, []);
 
-  // Fetch online users with caching
-/// Fetch online users with COMPRESSED caching
+ /// ✅ FINAL: Fast fetch with sessionStorage backup
 const [isPending, startTransition] = useTransition();
 const fetchOnlineUsers = useCallback(async () => {
   try {
-    setIsLoadingUsers(true);
+    const showLoading = users.length === 0;
+    if (showLoading) setIsLoadingUsers(true);
+    
     const json = await api.getOnlineUsers();
     
     if (json?.success) {
@@ -458,79 +461,30 @@ const fetchOnlineUsers = useCallback(async () => {
       startTransition(() => {
         setUsers(others);
         setOnlineCount(others.length);
-        setIsLoadingUsers(false);
+        if (showLoading) setIsLoadingUsers(false);
         
-        // 💾 Cache with compression (store only essential fields)
+        // Try session cache (non-critical)
         try {
-          // ✅ Store ONLY essential fields to save space
-          const compressed = others.map(u => ({
-            _id: u._id,
-            fullName: u.fullName,
-            profileImage: u.profileImage,
-            bio: u.bio?.slice(0, 100), // Truncate bio to 100 chars
-            skills: u.skills?.slice(0, 3), // Max 3 skills
-            socialMedia: u.socialMedia,
-            ratePerMinute: u.ratePerMinute,
-            pricingTiers: u.pricingTiers,
-            online: u.online,
-            rating: u.rating
-          }));
-          
-          localStorage.setItem("cachedUsers", JSON.stringify(compressed));
-          console.log("💾 Cached", compressed.length, "users (compressed)");
-        } catch (cacheErr: any) {
-          console.warn("Cache write failed:", cacheErr.message);
-          
-          // ✅ If quota exceeded, clear old cache and retry
-          if (cacheErr.name === "QuotaExceededError") {
-            console.log("🧹 Cleaning localStorage...");
-            
-            // Remove old/large items
-            const keysToRemove = [];
-            for (let i = 0; i < localStorage.length; i++) {
-              const key = localStorage.key(i);
-              if (key && (
-                key.includes("debug") || 
-                key.includes("temp") ||
-                key.includes("old") ||
-                key.startsWith("loglevel")
-              )) {
-                keysToRemove.push(key);
-              }
-            }
-            
-            keysToRemove.forEach(k => localStorage.removeItem(k));
-            console.log("🗑️ Removed", keysToRemove.length, "old items");
-            
-            // Retry with minimal data
-            try {
-              const minimal = others.map(u => ({
-                _id: u._id,
-                fullName: u.fullName,
-                profileImage: u.profileImage,
-                skills: u.skills?.[0],
-                ratePerMinute: u.ratePerMinute,
-                online: u.online
-              }));
-              
-              localStorage.setItem("cachedUsers", JSON.stringify(minimal));
-              console.log("✅ Cached minimal user data");
-            } catch (retryErr) {
-              console.error("❌ Cache still failed - localStorage full");
-            }
-          }
-        }
+          sessionStorage.setItem("cachedUsers", JSON.stringify(
+            others.map(u => ({
+              _id: u._id,
+              fullName: u.fullName,
+              profileImage: u.profileImage,
+              skills: u.skills?.[0],
+              ratePerMinute: u.ratePerMinute,
+              online: u.online
+            }))
+          ));
+        } catch {}
       });
       
-      console.log("✅ Fetched online users:", others.length);
-    } else {
-      setIsLoadingUsers(false);
+      console.log("✅ Fetched users:", others.length);
     }
   } catch (err) {
-    console.error("Fetch users error:", err);
+    console.error(err);
     setIsLoadingUsers(false);
   }
-}, [currentUser?._id]);
+}, [currentUser?._id, users.length]);
 
   // ✅ FIXED: Socket event handling - removed problematic dependency array
   useEffect(() => {
