@@ -1,4 +1,5 @@
  // frontend/src/pages/UnifiedDashboard.tsx
+  import { useCallback, useTransition } from "react"; // Add to existing React imports
   import React, { useEffect, useState, useMemo, useRef } from "react";
   import { useNavigate } from "react-router-dom";
   import {
@@ -10,6 +11,7 @@
   import { Input } from "@/components/ui/input";
   import { Switch } from "@/components/ui/switch";
   import { Label } from "@/components/ui/label";
+  import { Card } from "@/components/ui/card";
   import {
     Search,
     Bell,
@@ -100,6 +102,8 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
 
     const [searchTerm, setSearchTerm] = useState("");
     const [users, setUsers] = useState<any[]>([]);
+    const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+    const [visibleCount, setVisibleCount] = useState(12); // Add this line
     //const [incomingCall, setIncomingCall] = useState<any | null>(null);
     //const [showIncoming, setShowIncoming] = useState(false);
     const [currentUser, setCurrentUser] = useState<any | null>(null);
@@ -146,59 +150,58 @@ const [isOnline, setIsOnline] = useState<boolean>(() => {
     
 
   // ✅ FIXED: Load current user - only set toggle state once on initial load
+ // ✅ FIXED: Aggressive prefetching - load users FIRST, then user data
   useEffect(() => {
     let mounted = true;
+    
+    // 🚀 STEP 1: Fetch users IMMEDIATELY (no waiting for currentUser)
+    console.log("🚀 Prefetching users on mount...");
+    fetchOnlineUsers();
+    
+    // 🚀 STEP 2: Then load current user in parallel
     api
       .getMe()
-        .then((res) => {
-    if (!mounted) return;
-    if (res?.success) {
-      setCurrentUser(res.user);
+      .then((res) => {
+        if (!mounted) return;
+        if (res?.success) {
+          setCurrentUser(res.user);
 
-      if (!userManuallyToggled.current && !initialLoadComplete.current) {
-        const saved = localStorage.getItem("isOnline");
-        const restored = saved === "true";
-        const finalState = restored ? true : false;
-        console.log("Initial load: forcing isOnline =", finalState);
-        setIsOnline(finalState);
-        initialLoadComplete.current = true;
-      }
-
-      // ✅ NEW: Always fetch online users once after login (even if user is offline)
-      setTimeout(() => {
-        console.log("🔄 Initial fetch of online users after login");
-        fetchOnlineUsers();
-      }, 500);
-    }
-  })
-
+          if (!userManuallyToggled.current && !initialLoadComplete.current) {
+            const saved = localStorage.getItem("isOnline");
+            const restored = saved === "true";
+            const finalState = restored ? true : false;
+            console.log("Initial load: forcing isOnline =", finalState);
+            setIsOnline(finalState);
+            initialLoadComplete.current = true;
+          }
+        }
+      })
       .catch((err) => {
         console.error("getMe error:", err);
         initialLoadComplete.current = true;
       });
+    
     return () => {
       mounted = false;
     };
   }, []);
 
 
-
   // --- Web Push Subscription Setup ---
 useEffect(() => {
   if (!currentUser?._id) return;
 
-  // ✅ ADD THIS: Request permission immediately when user logs in
+  // ✅ Ask for permission once when user logs in
   const requestPushPermission = async () => {
-    if (!('Notification' in window)) {
+    if (!("Notification" in window)) {
       console.log("⚠️ Notifications not supported");
       return;
     }
 
-     // Show permission dialog
     if (Notification.permission === "default") {
       const permission = await Notification.requestPermission();
       console.log("🔔 Notification permission:", permission);
-      
+
       if (permission === "granted") {
         toast({
           title: "🔔 Notifications Enabled",
@@ -208,14 +211,17 @@ useEffect(() => {
     }
   };
 
-   // Request permission first
   requestPushPermission();
 
+  // ✅ SAFE: Convert base64 URL key to Uint8Array with padding
   const urlBase64ToUint8Array = (base64String: string) => {
+    base64String = base64String.trim();
+
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)
       .replace(/-/g, "+")
       .replace(/_/g, "/");
+
     const rawData = window.atob(base64);
     const outputArray = new Uint8Array(rawData.length);
     for (let i = 0; i < rawData.length; ++i) {
@@ -226,50 +232,81 @@ useEffect(() => {
 
   const subscribeToPush = async () => {
     try {
-      // Check if service worker and push are supported
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
         console.log("⚠️ Push notifications not supported in this browser");
         return;
       }
 
-      // ✅ FIXED: Check if VAPID key exists
       const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      console.log("🔑 VAPID key from env:", vapidKey, "length:", vapidKey?.length);
+
       if (!vapidKey) {
         console.warn("⚠️ VAPID public key not configured");
         return;
       }
 
       const registration = await navigator.serviceWorker.ready;
+      console.log("👷 SW ready:", registration);
 
+      // Permissions
       if (Notification.permission === "default") {
-        await Notification.requestPermission();
-      }
-      
-      if (Notification.permission !== "granted") {
-        console.warn("🔕 Push permission not granted");
+        const permission = await Notification.requestPermission();
+        console.log("🔔 Notification permission:", permission);
+        if (permission !== "granted") {
+          console.warn("🔕 Push permission not granted");
+          return;
+        }
+      } else if (Notification.permission === "denied") {
+        console.warn("🔕 Notifications denied by user");
         return;
       }
 
+      // ✅ Check existing subscription first
+      let existing = await registration.pushManager.getSubscription();
+      console.log("📬 Existing subscription:", existing);
+
+      if (existing) {
+        console.log("♻️ Reusing existing push subscription");
+        const payload = existing.toJSON ? existing.toJSON() : JSON.parse(JSON.stringify(existing));
+        const res = await api.savePushSubscription(currentUser._id, payload);
+
+        if (res.success) {
+          console.log("✅ Existing push subscription saved successfully!");
+        } else {
+          console.error("❌ Failed to save existing subscription:", res);
+        }
+        return;
+      }
+
+      // ✅ Create new subscription if none exists
+      const appServerKey = urlBase64ToUint8Array(vapidKey);
+      console.log("📐 applicationServerKey Uint8Array length:", appServerKey.length);
+
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        applicationServerKey: appServerKey,
       });
 
-      // ✅ FIXED: Use proper API call
-      const res = await api.savePushSubscription(currentUser._id, subscription);
-      
+      console.log("✅ New push subscription created:", subscription);
+
+      const payload = subscription.toJSON ? subscription.toJSON() : JSON.parse(JSON.stringify(subscription));
+      const res = await api.savePushSubscription(currentUser._id, payload);
+
+
       if (res.success) {
         console.log("✅ Push subscription saved successfully!");
       } else {
         console.error("❌ Failed to save push subscription:", res);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Push subscription failed:", err);
+      console.log("❌ Error name:", err?.name, "message:", err?.message);
     }
   };
 
   subscribeToPush();
 }, [currentUser]);
+
 
 
 
@@ -356,22 +393,42 @@ useEffect(() => {
   return () => window.removeEventListener('notification-dismissed', handleNotificationDismissed);
 }, []);
 
-  // Fetch online users
-  const fetchOnlineUsers = async () => {
-    try {
-      const json = await api.getOnlineUsers();
-      if (json?.success) {
-        const all = json.users || [];
-        const myId = currentUser?._id || localStorage.getItem("userId");
-        const others = all.filter((u: any) => u._id !== myId);
+  /// Fetch online users with debouncing
+const [isPending, startTransition] = useTransition();
+// ✅ FIXED: Fetch ALL users, not just online ones
+const fetchOnlineUsers = useCallback(async () => {
+  try {
+    setIsLoadingUsers(true);
+    const json = await api.getOnlineUsers();
+    
+    if (json?.success) {
+      const all = json.users || [];
+      const myId = currentUser?._id || localStorage.getItem("userId");
+      
+      // ✅ Show ALL users (both online and offline)
+      const others = all.filter((u: any) => u._id !== myId);
+      
+      startTransition(() => {
         setUsers(others);
-        setOnlineCount(others.length);
-        console.log("Fetched online users:", others.length);
-      }
-    } catch (err) {
-      console.error("Fetch users error:", err);
+        
+        // ✅ Count online users separately
+        const onlineUsers = others.filter((u: any) => u.online);
+        setOnlineCount(onlineUsers.length);
+        
+        setIsLoadingUsers(false);
+      });
+      
+      console.log(`📊 Loaded ${others.length} users (${onlineUsers.length} online)`);
+    } else {
+      console.error("❌ Failed to fetch users:", json?.message);
+      setIsLoadingUsers(false);
     }
-  };
+  } catch (err) {
+    console.error("❌ Fetch users error:", err);
+    setIsLoadingUsers(false);
+  }
+}, [currentUser?._id]);
+
 
   // ✅ FIXED: Socket event handling - removed problematic dependency array
   useEffect(() => {
@@ -383,18 +440,20 @@ useEffect(() => {
     console.log("Setting up socket listeners");
 
     const onConnect = () => {
-      console.log("Socket connected:", socket.id);
-      // ✅ ALWAYS fetch users when socket connects (don't check initialLoadComplete)
-      fetchOnlineUsers();
-        // ✅ Re-sync last known online status when reconnecting
-    const savedStatus = localStorage.getItem("isOnline") === "true";
-    socket.emit("user:status:update", {
-      userId: currentUser?._id || localStorage.getItem("userId"),
-      isOnline: savedStatus,
-    });
-    console.log("🔄 Restored online status from localStorage:", savedStatus);
-
-    };
+  console.log("Socket connected:", socket.id);
+  
+  // ✅ Only fetch if we don't already have users
+  if (users.length === 0) {
+    fetchOnlineUsers();
+  }
+  
+  const savedStatus = localStorage.getItem("isOnline") === "true";
+  socket.emit("user:status:update", {
+    userId: currentUser?._id || localStorage.getItem("userId"),
+    isOnline: savedStatus,
+  });
+  console.log("🔄 Restored online status from localStorage:", savedStatus);
+};
 
   const onUserStatus = async (update: any) => {
   const myUserId = currentUser?._id || localStorage.getItem("userId");
@@ -572,16 +631,19 @@ const onWalletUpdated = (data: any) => {
 
 const onUserNowOnline = (data: any) => {
   console.log("🎉 User came online event received:", data);
-  
-  // ✅ Check if we already notified about this user in this session
+
+  // ✅ Avoid duplicate toasts for same user in this session
   if (notifiedUsers.has(data.userId)) {
     console.log("⏭️ Already notified about this user, skipping");
     return;
   }
-  
-  // ✅ Mark as notified
-  setNotifiedUsers(prev => new Set(prev).add(data.userId));
-  
+
+  setNotifiedUsers((prev) => {
+    const next = new Set(prev);
+    next.add(data.userId);
+    return next;
+  });
+
   toast({
     title: "🎉 User is Now Online!",
     description: `${data.userName} just came online. Connect now!`,
@@ -590,19 +652,28 @@ const onUserNowOnline = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
-          // Find the user and open pricing modal
-          const user = users.find(u => u._id === data.userId);
-          if (user) {
-            openPricingForTeacher(user);
-          }
+          // ✅ Build a minimal teacher object and let openPricingForTeacher fetch full data
+          const teacherLike = {
+            _id: data.userId,
+            id: data.userId,
+            fullName: data.userName,
+            name: data.userName,
+            online: true,
+          };
+
+          console.log(
+            "🔍 Opening pricing from toast (now-online) for:",
+            teacherLike.fullName
+          );
+          openPricingForTeacher(teacherLike);
         }}
       >
         Connect
       </Button>
     ),
   });
-  
-  // Refresh users list to show them as online
+
+  // Just refresh list in background
   fetchOnlineUsers();
 };
 
@@ -621,7 +692,7 @@ const onUserNowOnline = (data: any) => {
     // ✅ NEW: Listen for manual "I'm available" notification
 const onUserNowAvailable = (data: any) => {
   console.log("📞 User is now available (manual notify):", data);
-  
+
   toast({
     title: "📞 User is Now Available!",
     description: `${data.userName} is online and ready to connect!`,
@@ -630,24 +701,30 @@ const onUserNowAvailable = (data: any) => {
       <Button
         size="sm"
         onClick={() => {
-          const user = users.find(u => u._id === data.userId);
-          if (user) {
-            openPricingForTeacher(user);
-          } else {
-            fetchOnlineUsers().then(() => {
-              const freshUser = users.find(u => u._id === data.userId);
-              if (freshUser) openPricingForTeacher(freshUser);
-            });
-          }
+          // ✅ Same idea: minimal teacher, let modal logic fetch full details
+          const teacherLike = {
+            _id: data.userId,
+            id: data.userId,
+            fullName: data.userName,
+            name: data.userName,
+            online: true,
+          };
+
+          console.log(
+            "🔍 Opening pricing from toast (now-available) for:",
+            teacherLike.fullName
+          );
+          openPricingForTeacher(teacherLike);
         }}
       >
         Connect Now
       </Button>
     ),
   });
-  
+
   fetchOnlineUsers();
 };
+
 
 // Register the listener
 socket.on("user:now-available", onUserNowAvailable);
@@ -1210,36 +1287,47 @@ socket.on("user:now-available", onUserNowAvailable);
             </div>
           </div>
 
-          {/* Available users */}
-          <div className="mb-8">
-            <h3 className="text-lg font-semibold mb-4">
-              Available Users ({onlineCount})
-            </h3>
-            <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-              {filteredUsers.map((u, i) => {
-    console.log("🎨 Rendering card for user:", {
-      name: u.fullName,
-      bio: u.bio,
-      skills: u.skills,
-      hasImage: !!u.profileImage,
-    });
-
-    return (
+          {/* Available users with lazy loading */}
+<div className="mb-8">
+ <h3 className="text-lg font-semibold mb-4">
+  All Users ({users.length} total, {onlineCount} online)
+  {isPending && <span className="text-sm text-muted-foreground ml-2">(Loading...)</span>}
+</h3>
+  <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+  {isLoadingUsers ? (
+    Array.from({ length: 8 }).map((_, i) => (
+      <Card key={`skeleton-${i}`} className="p-5 space-y-4 animate-pulse">
+        <div className="flex items-start gap-3">
+          <div className="h-12 w-12 rounded-full bg-muted" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 bg-muted rounded w-3/4" />
+            <div className="h-3 bg-muted rounded w-1/2" />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="h-3 bg-muted rounded" />
+          <div className="h-3 bg-muted rounded w-5/6" />
+        </div>
+        <div className="h-10 bg-muted rounded" />
+      </Card>
+    ))
+  ) : (
+    filteredUsers.slice(0, visibleCount).map((u, i) => (
       <TeacherCard
         key={u._id || i}
         teacher={{
           _id: u._id,
-          id: u._id, // Both _id and id for compatibility
+          id: u._id,
           fullName: u.fullName,
           name: u.fullName || u.profile?.name || u.phoneNumber || "User",
-          profileImage: u.profileImage, // Direct from API
-          bio: u.bio, // Direct from API
-          skills: u.skills, // Direct from API (array)
-          expertise: u.skills?.[0] || "Skill not specified", // First skill
+          profileImage: u.profileImage,
+          bio: u.bio,
+          skills: u.skills,
+          expertise: u.skills?.[0] || "Skill not specified",
           rating: u.profile?.rating || 4.8,
           isOnline: u.online,
           online: u.online,
-          socialMedia: u.socialMedia, // Direct from API
+          socialMedia: u.socialMedia,
           pricingTiers: Array.isArray(u.pricingTiers)
             ? u.pricingTiers
             : [
@@ -1248,20 +1336,30 @@ socket.on("user:now-available", onUserNowAvailable);
               ],
           ratePerMinute: u.ratePerMinute || 39,
         }}
-        onConnect={() =>
-          handleConnect(u._id, u.ratePerMinute || 39, u)
-        }
+        onConnect={() => handleConnect(u._id, u.ratePerMinute || 39, u)}
       />
-    );
-  })}
+    ))
+  )}
 
-              {filteredUsers.length === 0 && (
-                <div className="text-muted-foreground">
-                  No users online right now.
-                </div>
-              )}
-            </div>
-          </div>
+  {!isLoadingUsers && filteredUsers.length === 0 && (
+    <div className="col-span-full text-center text-muted-foreground py-12">
+      <p className="text-lg">No users found</p>
+      <p className="text-sm mt-2">Try adjusting your search or filters</p>
+    </div>
+  )}
+</div>
+
+{!isLoadingUsers && filteredUsers.length > visibleCount && (
+  <div className="text-center mt-6">
+    <Button
+      variant="outline"
+      onClick={() => setVisibleCount(prev => prev + 12)}
+    >
+      Load More ({filteredUsers.length - visibleCount} more)
+    </Button>
+  </div>
+)}
+</div>
         </main>
 
         
