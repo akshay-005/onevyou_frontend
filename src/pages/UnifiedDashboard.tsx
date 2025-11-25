@@ -408,13 +408,12 @@ const fetchOnlineUsers = useCallback(async () => {
       // ✅ Show ALL users (both online and offline)
       const others = all.filter((u: any) => u._id !== myId);
       
+      // ✅ FIX: Declare onlineUsers BEFORE using it in startTransition
+      const onlineUsers = others.filter((u: any) => u.online);
+      
       startTransition(() => {
         setUsers(others);
-        
-        // ✅ Count online users separately
-        const onlineUsers = others.filter((u: any) => u.online);
-        setOnlineCount(onlineUsers.length);
-        
+        setOnlineCount(onlineUsers.length); // ✅ Now this works
         setIsLoadingUsers(false);
       });
       
